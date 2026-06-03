@@ -30,10 +30,12 @@ class RequirementsAgentTests(unittest.TestCase):
 
         markdown = result.to_markdown()
         self.assertEqual(result.title, "Agent Ready Requirements")
-        self.assertIn("Build a coaching platform that must manage bookings.", result.functional_requirements)
-        self.assertIn("The system must generate weekly reports.", result.functional_requirements)
+        self.assertIn("As a user, I want to manage bookings.", result.user_stories)
+        self.assertIn("The system shall manage bookings.", result.functional_requirements)
+        self.assertIn("The system shall generate weekly reports.", result.functional_requirements)
         self.assertIn("Use Python for the implementation.", result.constraints)
         self.assertIn("What authentication provider should be used?", result.open_questions)
+        self.assertIn("## User stories", markdown)
         self.assertIn("## Functional requirements", markdown)
         self.assertIn("- url: https://example.com/spec", markdown)
 

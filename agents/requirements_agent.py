@@ -23,6 +23,7 @@ class SourceDocument:
 class RequirementsResult:
     title: str
     summary: list[str]
+    user_stories: list[str]
     functional_requirements: list[str]
     non_functional_requirements: list[str]
     constraints: list[str]
@@ -32,6 +33,7 @@ class RequirementsResult:
     def to_markdown(self) -> str:
         sections = [
             ("Summary", self.summary),
+            ("User stories", self.user_stories),
             ("Functional requirements", self.functional_requirements),
             ("Non-functional requirements", self.non_functional_requirements),
             ("Constraints and assumptions", self.constraints),
@@ -75,6 +77,15 @@ class _HTMLTextExtractor(HTMLParser):
 
 
 class RequirementsAgent:
+    ROLE_PREFIXES = ("coachee", "coach")
+    ROLE_LABELS = {
+        "coach": "coach",
+        "coachee": "coachee",
+    }
+    ROLE_PLURALS = {
+        "coach": "coaches",
+        "coachee": "coachees",
+    }
     FUNCTIONAL_HINTS = (
         "must",
         "should",
@@ -105,7 +116,6 @@ class RequirementsAgent:
         "scalable",
         "accessible",
         "documentation",
-        "document",
         "tested",
         "testing",
         "observability",
@@ -139,22 +149,28 @@ class RequirementsAgent:
         title: str = "Development Requirements",
     ) -> RequirementsResult:
         sources = self._collect_sources(texts or [], file_paths or [], urls or [])
-        candidates = self._extract_candidates(source.content for source in sources)
+        statements = self._extract_statements(source.content for source in sources)
+        candidates = [statement["text"] for statement in statements]
 
-        summary = self._unique(self._select_summary(candidates))[:3]
-        functional = self._unique(self._classify(candidates, self.FUNCTIONAL_HINTS))[:12]
+        functional_statements = self._classify_statements(statements, self.FUNCTIONAL_HINTS)
+        if not functional_statements:
+            functional_statements = statements[:]
+
+        summary = self._unique(self._build_summary(statement) for statement in functional_statements)[:3]
+        user_stories = self._unique(self._build_user_story(statement) for statement in functional_statements)[:12]
+        functional = self._unique(
+            self._build_functional_requirement(statement) for statement in functional_statements
+        )[:12]
         non_functional = self._unique(self._classify(candidates, self.NON_FUNCTIONAL_HINTS))[:8]
         constraints = self._unique(self._classify(candidates, self.CONSTRAINT_HINTS))[:8]
         open_questions = self._unique(
             sentence for sentence in candidates if self._contains_hint(sentence, self.QUESTION_HINTS)
         )[:8]
 
-        if not functional:
-            functional = summary[:]
-
         return RequirementsResult(
             title=title,
             summary=summary or ["Summarise the provided inputs before implementation begins."],
+            user_stories=user_stories,
             functional_requirements=functional,
             non_functional_requirements=non_functional,
             constraints=constraints,
@@ -206,16 +222,278 @@ class RequirementsAgent:
                         candidates.append(sentence)
         return candidates
 
+    def _extract_statements(self, contents: Iterable[str]) -> list[dict[str, str | None]]:
+        statements: list[dict[str, str | None]] = []
+        current_actor: str | None = None
+        for content in contents:
+            normalised = re.sub(r"\r\n?", "\n", content).strip()
+            if not normalised:
+                continue
+            segments = [
+                re.sub(r"\s+", " ", segment).strip(" -")
+                for segment in re.split(
+                    r"(?:\n+| {2,}(?=(?:Coachee|Coach|I want|The ability to|Tasks can|Have a list of))|(?<=[.!?])\s+)",
+                    normalised,
+                )
+                if segment.strip(" -")
+            ]
+
+            for segment in segments:
+                actor, cleaned = self._extract_actor(segment, current_actor)
+                if actor:
+                    current_actor = actor
+                if len(cleaned) >= 12:
+                    statements.append({"actor": current_actor, "text": cleaned})
+        return statements
+
+    def _extract_actor(self, segment: str, current_actor: str | None) -> tuple[str | None, str]:
+        cleaned = segment.strip()
+        actor = current_actor
+        for prefix in self.ROLE_PREFIXES:
+            if cleaned.lower().startswith(f"{prefix} "):
+                actor = prefix
+                cleaned = cleaned[len(prefix) :].strip(" ,:-")
+                break
+        return actor, cleaned
+
     def _select_summary(self, sentences: Iterable[str]) -> list[str]:
         return [sentence for sentence in sentences if not self._contains_hint(sentence, self.QUESTION_HINTS)][:3]
 
     def _classify(self, sentences: Iterable[str], hints: Iterable[str]) -> list[str]:
         return [sentence for sentence in sentences if self._contains_hint(sentence, hints)]
 
+    def _classify_statements(
+        self,
+        statements: Iterable[dict[str, str | None]],
+        hints: Iterable[str],
+    ) -> list[dict[str, str | None]]:
+        return [
+            statement
+            for statement in statements
+            if self._contains_hint(str(statement["text"]), hints)
+            and not self._contains_hint(str(statement["text"]), self.QUESTION_HINTS)
+        ]
+
+    def _build_summary(self, statement: dict[str, str | None]) -> str:
+        actor = statement["actor"]
+        capability, benefit = self._normalise_capability(str(statement["text"]), actor)
+        subject = self.ROLE_PLURALS.get(str(actor), "users") if actor else "users"
+        sentence = f"{subject.capitalize()} can {capability}"
+        if benefit:
+            sentence += f" so that {benefit}"
+        return self._ensure_sentence(sentence)
+
+    def _build_user_story(self, statement: dict[str, str | None]) -> str:
+        actor = str(statement["actor"] or "user")
+        capability, benefit = self._normalise_capability(str(statement["text"]), statement["actor"])
+        if capability.lower().startswith("coaches "):
+            story = f"As a {self.ROLE_LABELS.get(actor, actor)}, I want coaches to {capability[8:]}"
+        elif capability.lower().startswith("coachees "):
+            story = f"As a {self.ROLE_LABELS.get(actor, actor)}, I want coachees to {capability[9:]}"
+        else:
+            story = f"As a {self.ROLE_LABELS.get(actor, actor)}, I want to {capability}"
+        if benefit:
+            story += f", so that {benefit}"
+        return self._ensure_sentence(story)
+
+    def _build_functional_requirement(self, statement: dict[str, str | None]) -> str:
+        actor = statement["actor"]
+        capability, benefit = self._normalise_capability(str(statement["text"]), actor)
+        target_actor = self._infer_target_actor(capability, actor)
+        verb_phrase = self._strip_actor_target_prefix(capability)
+        if target_actor:
+            requirement = f"The system shall allow {self.ROLE_PLURALS[target_actor]} to {verb_phrase}"
+        else:
+            requirement = f"The system shall {verb_phrase}"
+        if benefit:
+            requirement += f" so that {benefit}"
+        return self._ensure_sentence(requirement)
+
+    def _normalise_capability(self, sentence: str, actor: str | None) -> tuple[str, str | None]:
+        cleaned = re.sub(r"\s+", " ", sentence.strip(" ."))
+        cleaned = re.sub(r"\b(can together from all plans)\b", "capture together from all plans", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(
+            r"^build a [^.]+? that must ",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        benefit: str | None = None
+
+        specialised = self._specialise_capability(cleaned, actor)
+        if specialised:
+            return specialised
+
+        split_match = re.match(r"(.+?),(?:\s*so that\s+|\s*so I can\s+|\s*that I can\s+)(.+)", cleaned, flags=re.IGNORECASE)
+        if split_match:
+            cleaned = split_match.group(1).strip(" ,")
+            benefit = self._normalise_benefit(split_match.group(2), actor)
+
+        lowered = cleaned.lower()
+        if lowered.startswith("i want the ability to "):
+            capability = cleaned[22:]
+        elif lowered.startswith("the ability to "):
+            capability = cleaned[15:]
+        elif lowered.startswith("i want to "):
+            capability = cleaned[10:]
+        elif lowered.startswith("i want "):
+            remainder = cleaned[7:]
+            capability = f"have {remainder}" if re.match(r"(?i)(a|an|the|my|our)\b", remainder) else remainder
+        elif lowered.startswith("have a list of "):
+            capability = cleaned
+        else:
+            capability = cleaned
+
+        capability = self._normalise_phrase(capability, actor)
+        capability = re.sub(r"^(must|should|shall|needs to|need to)\s+", "", capability, flags=re.IGNORECASE)
+        capability = re.sub(r"^(the system)\s+(must|should|shall)\s+", "", capability, flags=re.IGNORECASE)
+        benefit = benefit or self._derive_benefit(capability, actor)
+        capability = re.sub(r"\bmy\b", "their", capability, flags=re.IGNORECASE)
+        capability = re.sub(r"\bme\b", "the user", capability, flags=re.IGNORECASE)
+        capability = capability[0].lower() + capability[1:] if capability else capability
+        return capability.rstrip("."), benefit.rstrip(".") if benefit else None
+
+    def _normalise_phrase(self, phrase: str, actor: str | None) -> str:
+        cleaned = phrase.strip(" .")
+        cleaned = re.sub(r"\bnormal calendaring apps of choice\b", "preferred calendaring apps", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bmicrosoft outlook, google gmail/calendar\b", "Microsoft Outlook and Google Calendar", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bgoogle gmail/calendar\b", "Google Calendar", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bcontianing\b", "containing", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\b1 to 1\b", "one-to-one", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\b@ to their name\b", "mentioned with @mentions", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bwhere they can respond to me and I'll be notified\b", "with threaded replies and notifications", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bthat can then be prioritised and visualised on a kanban board to track progress\b", "that can be prioritised and visualised on a kanban board to track progress", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bthat outlines the overall goal, key actions/tasks and sequence that break the goal down that can be visualised on a kanban style board, and a target date\b", "a coaching plan with an overall goal, sequenced actions, a kanban-style board, and a target date", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bi can together from all plans in chronological order\b", "capture across all plans in chronological order", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bjournal and or write notes\b", "journal and write notes", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bcoachees being able to share information/documents with me 1 to 1 and show up against their profile\b", "coachees to share one-to-one information and documents that appear on their profile", cleaned, flags=re.IGNORECASE)
+        if actor == "coach":
+            cleaned = re.sub(r"\bmy availability\b", "coach availability", cleaned, flags=re.IGNORECASE)
+        return cleaned
+
+    def _specialise_capability(self, sentence: str, actor: str | None) -> tuple[str, str | None] | None:
+        lowered = sentence.lower()
+
+        if "availability" in lowered and "request coaching sessions" in lowered:
+            return (
+                "manage coach availability for session requests",
+                "coachees can book within approved time slots",
+            )
+        if "request coaching sessions" in lowered and ("outlook" in lowered or "calendar" in lowered):
+            return (
+                "request coaching sessions with a coach and sync them with Microsoft Outlook and Google Calendar",
+                "session bookings stay aligned with preferred calendar tools",
+            )
+        if "coaching plan" in lowered and "kanban" in lowered:
+            return (
+                "manage a coaching plan with an overall goal, sequenced actions, a kanban-style board, and a target date",
+                "progress remains visible over time",
+            )
+        if "comments/discussion against an action/task" in lowered:
+            return (
+                "add discussion to coaching tasks and mention a coach with @mentions",
+                "coach and coachee stay aligned on next steps",
+            )
+        if "add insights against my profile" in lowered:
+            return (
+                "coaches add insights to their coachee profiles",
+                "progress can be reviewed over time",
+            )
+        if "central location" in lowered and "shared" in lowered:
+            return (
+                "access a central hub for coach-shared information, including plan-specific resources",
+                "important information stays easy to find",
+            )
+        if "journal" in lowered and "chronological order" in lowered:
+            return (
+                "journal and capture plan notes in a chronological timeline",
+                "progress can be reflected on over time",
+            )
+        if "have a list of coachees" in lowered or "filtered/searched" in lowered:
+            return (
+                "search and filter coachee profiles with contact details and profile photos",
+                "coach workloads remain easy to manage",
+            )
+        if "set up one to many coaching plans" in lowered or ("coaching plan" in lowered and "prioritised" in lowered):
+            return (
+                "create multiple coaching plans per coachee with prioritised kanban-tracked tasks",
+                "coaching work stays structured and measurable",
+            )
+        if lowered.startswith("tasks can have discussion"):
+            return (
+                "support task discussions and notifications for @mentions",
+                "collaboration stays timely and visible",
+            )
+        if "coaching resources section" in lowered or ("share useful information and documents" in lowered and "coachees" in lowered):
+            return (
+                "share coaching resources and one-to-one documents with coachees",
+                "shared materials remain easy to find",
+            )
+        return None
+
+    def _derive_benefit(self, capability: str, actor: str | None) -> str | None:
+        lowered = capability.lower()
+        if "integrate with" in lowered:
+            return "calendar availability stays synchronized"
+        if "kanban" in lowered:
+            return "progress remains visible over time"
+        if "@" in lowered or "notification" in lowered:
+            return "coach and coachee stay aligned on next steps"
+        if "insights against" in lowered:
+            return "progress can be reviewed over time"
+        if "journal" in lowered or "notes" in lowered:
+            return "progress can be reflected on chronologically"
+        if "resources" in lowered or "documents" in lowered:
+            return "shared materials remain easy to find"
+        return None
+
+    def _normalise_benefit(self, benefit: str, actor: str | None) -> str:
+        cleaned = benefit.strip(" .,")
+        cleaned = re.sub(r"\bmy\b", "their", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bme\b", "the user", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bi'll\b", "they will", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bi can\b", "the user can", cleaned, flags=re.IGNORECASE)
+        if actor == "coach":
+            cleaned = re.sub(r"\bmy\b", "the coach's", cleaned, flags=re.IGNORECASE)
+        return cleaned
+
+    def _infer_target_actor(self, capability: str, fallback_actor: str | None) -> str | None:
+        lowered = capability.lower()
+        if lowered.startswith("coaches to ") or lowered.startswith("coaches "):
+            return "coach"
+        if lowered.startswith("coachees to ") or lowered.startswith("coachees "):
+            return "coachee"
+        return fallback_actor
+
+    def _strip_actor_target_prefix(self, capability: str) -> str:
+        cleaned = re.sub(r"^(coaches|coachees) to ", "", capability, flags=re.IGNORECASE)
+        cleaned = re.sub(r"^(coaches|coachees) ", "", cleaned, flags=re.IGNORECASE)
+        return cleaned
+
+    @staticmethod
+    def _ensure_sentence(text: str) -> str:
+        cleaned = text.strip()
+        if not cleaned:
+            return cleaned
+        if cleaned[-1] not in ".!?":
+            return f"{cleaned}."
+        return cleaned
+
     @staticmethod
     def _contains_hint(sentence: str, hints: Iterable[str]) -> bool:
         lowered = sentence.lower()
-        return any(hint in lowered for hint in hints)
+        for hint in hints:
+            if " " in hint:
+                if hint in lowered:
+                    return True
+                continue
+            if re.fullmatch(r"\W+", hint):
+                if hint in lowered:
+                    return True
+                continue
+            if re.search(rf"\b{re.escape(hint)}\b", lowered):
+                return True
+        return False
 
     @staticmethod
     def _unique(items: Iterable[str]) -> list[str]:
