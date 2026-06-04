@@ -56,6 +56,33 @@ class GitFlowAgentTests(unittest.TestCase):
         self.assertEqual(plan.feature_pull_request.mode, "dry-run")
         self.assertEqual(plan.release_pull_request.mode, "dry-run")
 
+    def test_cleanup_merged_feature_branch_defaults_to_local_and_remote(self) -> None:
+        agent = GitFlowAgent(
+            repo_path="/tmp/workspace/DJHamSambo/Coaching-Platform",
+            pr_backend=DryRunPullRequestBackend(),
+        )
+
+        cleanup_plan = agent.cleanup_merged_feature_branch(feature_name="Requirements Agent")
+
+        self.assertEqual(cleanup_plan.feature_branch, "feature/requirements-agent")
+        self.assertEqual(cleanup_plan.local_commands[0][-2:], ["-d", "feature/requirements-agent"])
+        self.assertEqual(cleanup_plan.remote_commands[0][-3:], ["origin", "--delete", "feature/requirements-agent"])
+
+    def test_cleanup_merged_feature_branch_can_skip_local_or_remote(self) -> None:
+        agent = GitFlowAgent(
+            repo_path="/tmp/workspace/DJHamSambo/Coaching-Platform",
+            pr_backend=DryRunPullRequestBackend(),
+        )
+
+        cleanup_plan = agent.cleanup_merged_feature_branch(
+            feature_name="Requirements Agent",
+            delete_local=False,
+            delete_remote=True,
+        )
+
+        self.assertEqual(cleanup_plan.local_commands, [])
+        self.assertEqual(len(cleanup_plan.remote_commands), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

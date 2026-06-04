@@ -109,6 +109,20 @@ class GitFlowPlan:
         }
 
 
+@dataclass(frozen=True)
+class BranchCleanupPlan:
+    feature_branch: str
+    local_commands: list[list[str]]
+    remote_commands: list[list[str]]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "feature_branch": self.feature_branch,
+            "local_commands": self.local_commands,
+            "remote_commands": self.remote_commands,
+        }
+
+
 class GitFlowAgent:
     def __init__(
         self,
@@ -185,6 +199,37 @@ class GitFlowAgent:
                 subprocess.run(command, check=True)
         return commands
 
+    def cleanup_merged_feature_branch(
+        self,
+        feature_name: str,
+        execute: bool = False,
+        delete_local: bool = True,
+        delete_remote: bool = True,
+    ) -> BranchCleanupPlan:
+        feature_branch = f"feature/{self._slugify(feature_name)}"
+        local_commands: list[list[str]] = []
+        remote_commands: list[list[str]] = []
+
+        if delete_local:
+            local_commands.append(["git", "-C", str(self.repo_path), "branch", "-d", feature_branch])
+        if delete_remote:
+            remote_commands.append(["git", "-C", str(self.repo_path), "push", "origin", "--delete", feature_branch])
+
+        if execute:
+            subprocess.run(["git", "-C", str(self.repo_path), "fetch", "origin"], check=True)
+            subprocess.run(
+                ["git", "-C", str(self.repo_path), "merge-base", "--is-ancestor", feature_branch, self.master_branch],
+                check=True,
+            )
+            for command in local_commands + remote_commands:
+                subprocess.run(command, check=True)
+
+        return BranchCleanupPlan(
+            feature_branch=feature_branch,
+            local_commands=local_commands,
+            remote_commands=remote_commands,
+        )
+
     @staticmethod
     def _slugify(value: str) -> str:
         slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
@@ -213,6 +258,21 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Sync master back into the dev branch after release work is complete.",
     )
+    parser.add_argument(
+        "--cleanup-feature-branch",
+        action="store_true",
+        help="Clean up a merged feature branch (local and/or remote).",
+    )
+    parser.add_argument(
+        "--no-delete-local",
+        action="store_true",
+        help="When cleaning up, do not delete the local feature branch.",
+    )
+    parser.add_argument(
+        "--no-delete-remote",
+        action="store_true",
+        help="When cleaning up, do not delete the remote feature branch.",
+    )
     return parser
 
 
@@ -225,6 +285,16 @@ def main() -> int:
     )
     if args.sync_master_back:
         print(json.dumps({"commands": agent.sync_master_back_to_dev(execute=args.execute)}, indent=2))
+        return 0
+
+    if args.cleanup_feature_branch:
+        cleanup_plan = agent.cleanup_merged_feature_branch(
+            feature_name=args.feature,
+            execute=args.execute,
+            delete_local=not args.no_delete_local,
+            delete_remote=not args.no_delete_remote,
+        )
+        print(json.dumps(cleanup_plan.to_dict(), indent=2))
         return 0
 
     plan = agent.process_change(
