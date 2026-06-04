@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/components/discussionpanel.tsx","./src/components/insightsjournal.tsx","./src/components/kanbanboard.tsx","./src/components/resourcelibrary.tsx","./src/components/sessionplanner.tsx","./src/data/seed.ts"],"version":"5.9.3"}
