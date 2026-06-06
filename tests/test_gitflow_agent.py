@@ -83,6 +83,35 @@ class GitFlowAgentTests(unittest.TestCase):
         self.assertEqual(cleanup_plan.local_commands, [])
         self.assertEqual(len(cleanup_plan.remote_commands), 1)
 
+    def test_merge_feature_into_master_cleans_up_feature_branch_by_default(self) -> None:
+        agent = GitFlowAgent(
+            repo_path="/tmp/workspace/DJHamSambo/Coaching-Platform",
+            pr_backend=DryRunPullRequestBackend(),
+        )
+
+        merge_plan = agent.merge_feature_into_master(feature_name="Requirements Agent")
+
+        self.assertEqual(merge_plan.feature_branch, "feature/requirements-agent")
+        self.assertEqual(merge_plan.merge_commands[1][-1], "master")
+        self.assertEqual(merge_plan.merge_commands[3][-2:], ["--no-ff", "feature/requirements-agent"])
+        self.assertIsNotNone(merge_plan.cleanup)
+        assert merge_plan.cleanup is not None
+        self.assertEqual(merge_plan.cleanup.local_commands[0][-2:], ["-d", "feature/requirements-agent"])
+        self.assertEqual(merge_plan.cleanup.remote_commands[0][-3:], ["origin", "--delete", "feature/requirements-agent"])
+
+    def test_merge_feature_into_master_can_keep_feature_branch(self) -> None:
+        agent = GitFlowAgent(
+            repo_path="/tmp/workspace/DJHamSambo/Coaching-Platform",
+            pr_backend=DryRunPullRequestBackend(),
+        )
+
+        merge_plan = agent.merge_feature_into_master(
+            feature_name="Requirements Agent",
+            delete_feature_branch=False,
+        )
+
+        self.assertIsNone(merge_plan.cleanup)
+
 
 if __name__ == "__main__":
     unittest.main()
