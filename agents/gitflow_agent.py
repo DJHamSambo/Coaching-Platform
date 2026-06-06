@@ -123,6 +123,20 @@ class BranchCleanupPlan:
         }
 
 
+@dataclass(frozen=True)
+class MergeToMasterPlan:
+    feature_branch: str
+    merge_commands: list[list[str]]
+    cleanup: BranchCleanupPlan | None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "feature_branch": self.feature_branch,
+            "merge_commands": self.merge_commands,
+            "cleanup": self.cleanup.to_dict() if self.cleanup else None,
+        }
+
+
 class GitFlowAgent:
     def __init__(
         self,
@@ -230,6 +244,42 @@ class GitFlowAgent:
             remote_commands=remote_commands,
         )
 
+    def merge_feature_into_master(
+        self,
+        feature_name: str,
+        execute: bool = False,
+        delete_feature_branch: bool = True,
+        delete_local: bool = True,
+        delete_remote: bool = True,
+    ) -> MergeToMasterPlan:
+        feature_branch = f"feature/{self._slugify(feature_name)}"
+        merge_commands = [
+            ["git", "-C", str(self.repo_path), "fetch", "origin"],
+            ["git", "-C", str(self.repo_path), "checkout", self.master_branch],
+            ["git", "-C", str(self.repo_path), "pull", "--ff-only", "origin", self.master_branch],
+            ["git", "-C", str(self.repo_path), "merge", "--no-ff", feature_branch],
+            ["git", "-C", str(self.repo_path), "push", "origin", self.master_branch],
+        ]
+
+        if execute:
+            for command in merge_commands:
+                subprocess.run(command, check=True)
+
+        cleanup_plan: BranchCleanupPlan | None = None
+        if delete_feature_branch:
+            cleanup_plan = self.cleanup_merged_feature_branch(
+                feature_name=feature_name,
+                execute=execute,
+                delete_local=delete_local,
+                delete_remote=delete_remote,
+            )
+
+        return MergeToMasterPlan(
+            feature_branch=feature_branch,
+            merge_commands=merge_commands,
+            cleanup=cleanup_plan,
+        )
+
     @staticmethod
     def _slugify(value: str) -> str:
         slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
@@ -264,6 +314,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Clean up a merged feature branch (local and/or remote).",
     )
     parser.add_argument(
+        "--merge-feature-into-master",
+        action="store_true",
+        help="Merge a feature branch into master and optionally delete that feature branch.",
+    )
+    parser.add_argument(
+        "--no-delete-feature-branch",
+        action="store_true",
+        help="When merging into master, keep the feature branch after merge.",
+    )
+    parser.add_argument(
         "--no-delete-local",
         action="store_true",
         help="When cleaning up, do not delete the local feature branch.",
@@ -295,6 +355,17 @@ def main() -> int:
             delete_remote=not args.no_delete_remote,
         )
         print(json.dumps(cleanup_plan.to_dict(), indent=2))
+        return 0
+
+    if args.merge_feature_into_master:
+        merge_plan = agent.merge_feature_into_master(
+            feature_name=args.feature,
+            execute=args.execute,
+            delete_feature_branch=not args.no_delete_feature_branch,
+            delete_local=not args.no_delete_local,
+            delete_remote=not args.no_delete_remote,
+        )
+        print(json.dumps(merge_plan.to_dict(), indent=2))
         return 0
 
     plan = agent.process_change(
