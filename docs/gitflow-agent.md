@@ -11,8 +11,6 @@
 - Pushes the feature branch
 - Creates a pull request from the feature branch into `dev`
 - Creates a release pull request from `dev` into `master`
-- Can merge a feature branch directly into `master`
-- Removes the feature branch after a successful merge into `master` (unless disabled)
 - Optionally syncs `master` back into `dev`
 - Optionally cleans up merged feature branches (local and remote)
 
@@ -54,36 +52,11 @@ python /tmp/workspace/DJHamSambo/Coaching-Platform/agents/gitflow_agent.py \
   --cleanup-feature-branch
 ```
 
-Merge a feature branch into `master` and automatically clean up the feature branch:
-
-```bash
-python /tmp/workspace/DJHamSambo/Coaching-Platform/agents/gitflow_agent.py \
-  --repo /tmp/workspace/DJHamSambo/Coaching-Platform \
-  --feature "requirements-agent" \
-  --commit-message "unused" \
-  --summary "unused" \
-  --merge-feature-into-master
-```
-
-Keep the feature branch after merge:
-
-```bash
-python /tmp/workspace/DJHamSambo/Coaching-Platform/agents/gitflow_agent.py \
-  --repo /tmp/workspace/DJHamSambo/Coaching-Platform \
-  --feature "requirements-agent" \
-  --commit-message "unused" \
-  --summary "unused" \
-  --merge-feature-into-master \
-  --no-delete-feature-branch
-```
-
 Cleanup options:
 
 - `--cleanup-feature-branch` enables cleanup mode.
 - `--no-delete-local` skips local branch deletion.
 - `--no-delete-remote` skips remote branch deletion.
-- `--merge-feature-into-master` merges `feature/<name>` into `master`.
-- `--no-delete-feature-branch` keeps the feature branch after a successful merge.
 
 ## Notes
 
@@ -91,4 +64,3 @@ Cleanup options:
 - Passing `--execute` runs the git commands directly.
 - The agent keeps the branch names configurable through `--dev-branch` and `--master-branch`.
 - In cleanup mode with `--execute`, the agent verifies the feature branch is merged into the configured `--master-branch` before deleting it.
-- In merge mode with `--execute`, the agent merges into `--master-branch` and then deletes the merged feature branch by default.
