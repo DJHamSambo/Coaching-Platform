@@ -137,6 +137,15 @@ class MergeToMasterPlan:
         }
 
 
+def _local_branch_exists(repo_path: "Path", branch: str) -> bool:
+    """Return True if *branch* exists as a local branch in the given repo."""
+    result = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "--verify", branch],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 class GitFlowAgent:
     def __init__(
         self,
@@ -231,12 +240,14 @@ class GitFlowAgent:
 
         if execute:
             subprocess.run(["git", "-C", str(self.repo_path), "fetch", "origin"], check=True)
+            # Use origin/branch for ancestor check so it works in fresh clones without local tracking branches
+            ancestor_ref = feature_branch if _local_branch_exists(self.repo_path, feature_branch) else f"origin/{feature_branch}"
             subprocess.run(
-                ["git", "-C", str(self.repo_path), "merge-base", "--is-ancestor", feature_branch, self.master_branch],
+                ["git", "-C", str(self.repo_path), "merge-base", "--is-ancestor", ancestor_ref, self.master_branch],
                 check=True,
             )
             for command in local_commands + remote_commands:
-                subprocess.run(command, check=True)
+                subprocess.run(command, check=True, capture_output=True)
 
         return BranchCleanupPlan(
             feature_branch=feature_branch,
@@ -257,7 +268,7 @@ class GitFlowAgent:
             ["git", "-C", str(self.repo_path), "fetch", "origin"],
             ["git", "-C", str(self.repo_path), "checkout", self.master_branch],
             ["git", "-C", str(self.repo_path), "pull", "--ff-only", "origin", self.master_branch],
-            ["git", "-C", str(self.repo_path), "merge", "--no-ff", feature_branch],
+            ["git", "-C", str(self.repo_path), "merge", "--no-ff", f"origin/{feature_branch}"],
             ["git", "-C", str(self.repo_path), "push", "origin", self.master_branch],
         ]
 
