@@ -24,8 +24,8 @@ from agents.code_review_agent import (
     Severity,
     _parse_model_response,
     _review_github_model,
-    review_github_claude,
     review_github_gpt4o,
+    review_github_gpt4o_mini,
     review_github_llama,
 )
 
@@ -464,7 +464,7 @@ class TestSelfDocumentation:
 
     def test_docs_mention_github_models(self):
         docs = CodeReviewAgent().self_documentation_markdown()
-        for key in ("github/gpt-4o", "github/claude", "github/llama"):
+        for key in ("github/gpt-4o", "github/gpt-4o-mini", "github/llama"):
             assert key in docs
 
 
@@ -486,10 +486,10 @@ class TestGitHubModelsBackend:
         with pytest.raises(RuntimeError, match="GITHUB_TOKEN"):
             review_github_gpt4o(self._make_diff_files())
 
-    def test_github_claude_raises_without_token(self, monkeypatch):
+    def test_github_gpt4o_mini_raises_without_token(self, monkeypatch):
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         with pytest.raises(RuntimeError, match="GITHUB_TOKEN"):
-            review_github_claude(self._make_diff_files())
+            review_github_gpt4o_mini(self._make_diff_files())
 
     def test_github_llama_raises_without_token(self, monkeypatch):
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
@@ -499,7 +499,7 @@ class TestGitHubModelsBackend:
     def test_github_models_in_registry(self):
         registry = CodeReviewAgent.MODEL_REGISTRY
         assert "github/gpt-4o" in registry
-        assert "github/claude" in registry
+        assert "github/gpt-4o-mini" in registry
         assert "github/llama" in registry
 
     def test_github_models_detected_when_token_set(self, monkeypatch):
@@ -510,7 +510,7 @@ class TestGitHubModelsBackend:
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         models = _available_models()
         assert "github/gpt-4o" in models
-        assert "github/claude" in models
+        assert "github/gpt-4o-mini" in models
         assert "github/llama" in models
 
     def test_github_models_not_detected_without_token(self, monkeypatch):

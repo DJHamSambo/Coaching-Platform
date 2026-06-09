@@ -474,11 +474,11 @@ def review_gemini(diff_files: list[DiffFile], model_id: str = "gemini-2.5-flash"
 # ---------------------------------------------------------------------------
 
 # Models available through the GitHub Models inference endpoint.
-# Each is a different provider/architecture — ideal for multi-model consensus.
+# Each is a different model for multi-perspective consensus.
 _GITHUB_MODELS: dict[str, str] = {
-    "github/gpt-4o":  "gpt-4o",
-    "github/claude":  "claude-sonnet-4-5",
-    "github/llama":   "meta-llama-4-scout",
+    "github/gpt-4o":      "gpt-4o",
+    "github/gpt-4o-mini": "gpt-4o-mini",
+    "github/llama":       "Meta-Llama-3.1-405B-Instruct",
 }
 _GITHUB_ENDPOINT = "https://models.inference.ai.azure.com/chat/completions"
 
@@ -509,8 +509,8 @@ def review_github_gpt4o(diff_files: list[DiffFile]) -> ModelReview:
     return _review_github_model(diff_files, "github/gpt-4o", _GITHUB_MODELS["github/gpt-4o"])
 
 
-def review_github_claude(diff_files: list[DiffFile]) -> ModelReview:
-    return _review_github_model(diff_files, "github/claude", _GITHUB_MODELS["github/claude"])
+def review_github_gpt4o_mini(diff_files: list[DiffFile]) -> ModelReview:
+    return _review_github_model(diff_files, "github/gpt-4o-mini", _GITHUB_MODELS["github/gpt-4o-mini"])
 
 
 def review_github_llama(diff_files: list[DiffFile]) -> ModelReview:
@@ -541,10 +541,10 @@ class CodeReviewAgent:
     DOCS_FILENAME    = "docs/code-review-agent.md"
 
     MODEL_REGISTRY: dict[str, callable] = {
-        # GitHub Copilot Models — single GITHUB_TOKEN, three architectures
-        "github/gpt-4o":  review_github_gpt4o,
-        "github/claude":  review_github_claude,
-        "github/llama":   review_github_llama,
+        # GitHub Copilot Models — single GITHUB_TOKEN, multiple models
+        "github/gpt-4o":      review_github_gpt4o,
+        "github/gpt-4o-mini": review_github_gpt4o_mini,
+        "github/llama":       review_github_llama,
         # Direct provider keys (optional fallback)
         "openai":         review_openai,
         "anthropic":      review_anthropic,
@@ -824,7 +824,7 @@ class CodeReviewAgent:
             "## Recommended setup — GitHub Copilot Models",
             "",
             "A single `GITHUB_TOKEN` (available to all GitHub Copilot subscribers) unlocks three",
-            "distinct model architectures through the GitHub Models inference endpoint — ideal for",
+            "models through the GitHub Models inference endpoint — ideal for",
             "multi-model consensus without needing separate provider API keys.",
             "",
             "Add to `.env` in the repo root:",
@@ -833,11 +833,11 @@ class CodeReviewAgent:
             "GITHUB_TOKEN=ghp_...",
             "```",
             "",
-            "| Model key | Model | Architecture |",
+            "| Model key | Model | Notes |",
             "|---|---|---|",
-            "| `github/gpt-4o` | GPT-4o | OpenAI transformer |",
-            "| `github/claude` | Claude Sonnet | Anthropic constitutional AI |",
-            "| `github/llama` | Meta Llama 4 Scout | Open-weight transformer |",
+            "| `github/gpt-4o` | GPT-4o | Full-capability OpenAI model |",
+            "| `github/gpt-4o-mini` | GPT-4o Mini | Faster, complementary perspective |",
+            "| `github/llama` | Meta Llama 3.1 405B | Open-weight alternative architecture |",
             "",
             "## Review dimensions",
             "",
@@ -883,7 +883,7 @@ class CodeReviewAgent:
             "python agents/code_review_agent.py --diff-file /tmp/my.patch",
             "",
             "# Use only specific models",
-            "python agents/code_review_agent.py --commit HEAD --models github/gpt-4o github/claude",
+            "python agents/code_review_agent.py --commit HEAD --models github/gpt-4o github/gpt-4o-mini",
             "",
             "# Regenerate this documentation",
             "python agents/code_review_agent.py --commit HEAD --update-docs",
@@ -910,7 +910,7 @@ class CodeReviewAgent:
             "## Environment variables",
             "",
             "```",
-            "GITHUB_TOKEN        — recommended: unlocks github/gpt-4o, github/claude, github/llama",
+            "GITHUB_TOKEN        — recommended: unlocks github/gpt-4o, github/gpt-4o-mini, github/llama",
             "OPENAI_API_KEY      — optional: direct OpenAI access",
             "ANTHROPIC_API_KEY   — optional: direct Anthropic access",
             "GEMINI_API_KEY      — optional: direct Google Gemini access",
@@ -940,7 +940,7 @@ def _available_models() -> list[str]:
     available = []
     # GitHub Models — one token, three models for consensus
     if os.environ.get("GITHUB_TOKEN"):
-        available.extend(["github/gpt-4o", "github/claude", "github/llama"])
+        available.extend(["github/gpt-4o", "github/gpt-4o-mini", "github/llama"])
     # Direct provider keys as fallback
     if os.environ.get("OPENAI_API_KEY"):
         available.append("openai")
