@@ -353,6 +353,20 @@ def _build_review_prompt(diff_files: list[DiffFile], model_name: str) -> str:
     """).strip()
 
 
+def _merge_model_reviews(reviews: list[ModelReview], model: str) -> ModelReview:
+    """Merge multiple per-batch ModelReviews into one for a single model."""
+    all_findings = [f for r in reviews for f in r.findings]
+    summaries = [r.summary for r in reviews if r.summary and r.summary != "(model did not produce a structured summary)"]
+    avg_score = round(sum(r.score for r in reviews) / len(reviews), 1) if reviews else 5
+    return ModelReview(
+        model=model,
+        findings=all_findings,
+        summary=" | ".join(summaries) if summaries else "(model did not produce a structured summary)",
+        score=int(avg_score),
+        raw="\n---\n".join(r.raw for r in reviews),
+    )
+
+
 def _parse_model_response(raw: str, model: str) -> ModelReview:
     """Extract structured findings and summary from a model's freeform response."""
     findings: list[Finding] = []
@@ -484,25 +498,51 @@ _GITHUB_ENDPOINT = "https://models.inference.ai.azure.com/chat/completions"
 
 
 def _review_github_model(diff_files: list[DiffFile], key: str, model_id: str) -> ModelReview:
-    """Call a single model through the GitHub Models inference API."""
+    """Call a single model through the GitHub Models inference API.
+
+    Files are reviewed in batches to stay within the 8 000-token free-tier
+    limit.  If a batch is still too large (HTTP 413) it is split in half and
+    retried recursively until each batch fits.
+    """
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         raise RuntimeError("GITHUB_TOKEN not set")
-    prompt  = _build_review_prompt(diff_files, key)
-    payload = {
-        "model": model_id,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.2,
-        "max_tokens": 4096,
-    }
-    raw  = _http_post(
-        _GITHUB_ENDPOINT,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        payload=payload,
-    )
-    data    = json.loads(raw)
-    content = data["choices"][0]["message"]["content"]
-    return _parse_model_response(content, key)
+
+    def _call_batch(batch: list[DiffFile]) -> ModelReview:
+        prompt  = _build_review_prompt(batch, key)
+        payload = {
+            "model": model_id,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+            "max_tokens": 2048,
+        }
+        raw  = _http_post(
+            _GITHUB_ENDPOINT,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            payload=payload,
+        )
+        data    = json.loads(raw)
+        content = data["choices"][0]["message"]["content"]
+        return _parse_model_response(content, key)
+
+    def _review_with_split(batch: list[DiffFile]) -> list[ModelReview]:
+        """Review a batch, splitting in half on 413 until each piece fits."""
+        if not batch:
+            return []
+        try:
+            return [_call_batch(batch)]
+        except RuntimeError as exc:
+            if "HTTP 413" not in str(exc) or len(batch) == 1:
+                raise
+            mid = len(batch) // 2
+            left  = _review_with_split(batch[:mid])
+            right = _review_with_split(batch[mid:])
+            return left + right
+
+    batch_reviews = _review_with_split(diff_files)
+    if len(batch_reviews) == 1:
+        return batch_reviews[0]
+    return _merge_model_reviews(batch_reviews, key)
 
 
 def review_github_gpt4o(diff_files: list[DiffFile]) -> ModelReview:

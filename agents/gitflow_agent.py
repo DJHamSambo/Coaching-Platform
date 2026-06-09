@@ -369,6 +369,22 @@ class GitFlowAgent:
         high     = len(by_sev[_Severity.HIGH])
         medium   = len(by_sev[_Severity.MEDIUM])
         low      = len(by_sev[_Severity.LOW])
+
+        # Require at least one model to have succeeded; if every model failed
+        # we cannot vouch for code quality and must block the merge.
+        if not result.model_reviews:
+            print(
+                "[ci] All AI models failed — cannot assess code quality.\n"
+                "[ci] MERGE BLOCKED until at least one model completes a review.\n"
+                "[ci] Check your GITHUB_TOKEN and network connectivity.",
+                file=sys.stderr,
+            )
+            return CIResult(
+                passed=False, score=0.0, models_used=[],
+                critical=0, high=0, medium=0, low=0,
+                fix_instructions_path=None,
+            )
+
         passed   = (critical + high + medium) == 0
 
         fix_path: Path | None = None
