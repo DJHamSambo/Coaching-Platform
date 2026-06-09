@@ -23,6 +23,10 @@ from agents.code_review_agent import (
     ReviewResult,
     Severity,
     _parse_model_response,
+    _review_github_model,
+    review_github_claude,
+    review_github_gpt4o,
+    review_github_llama,
 )
 
 
@@ -453,3 +457,78 @@ class TestSelfDocumentation:
     def test_docs_contain_usage_example(self):
         docs = CodeReviewAgent().self_documentation_markdown()
         assert "code_review_agent.py" in docs
+
+    def test_docs_mention_github_token(self):
+        docs = CodeReviewAgent().self_documentation_markdown()
+        assert "GITHUB_TOKEN" in docs
+
+    def test_docs_mention_github_models(self):
+        docs = CodeReviewAgent().self_documentation_markdown()
+        for key in ("github/gpt-4o", "github/claude", "github/llama"):
+            assert key in docs
+
+
+# ---------------------------------------------------------------------------
+# GitHub Models backend tests
+# ---------------------------------------------------------------------------
+
+class TestGitHubModelsBackend:
+    def _make_diff_files(self) -> list[DiffFile]:
+        return DiffParser().parse(SAMPLE_DIFF)
+
+    def test_github_model_raises_without_token(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        with pytest.raises(RuntimeError, match="GITHUB_TOKEN"):
+            _review_github_model(self._make_diff_files(), "github/gpt-4o", "gpt-4o")
+
+    def test_github_gpt4o_raises_without_token(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        with pytest.raises(RuntimeError, match="GITHUB_TOKEN"):
+            review_github_gpt4o(self._make_diff_files())
+
+    def test_github_claude_raises_without_token(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        with pytest.raises(RuntimeError, match="GITHUB_TOKEN"):
+            review_github_claude(self._make_diff_files())
+
+    def test_github_llama_raises_without_token(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        with pytest.raises(RuntimeError, match="GITHUB_TOKEN"):
+            review_github_llama(self._make_diff_files())
+
+    def test_github_models_in_registry(self):
+        registry = CodeReviewAgent.MODEL_REGISTRY
+        assert "github/gpt-4o" in registry
+        assert "github/claude" in registry
+        assert "github/llama" in registry
+
+    def test_github_models_detected_when_token_set(self, monkeypatch):
+        from agents.code_review_agent import _available_models
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_fake")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        models = _available_models()
+        assert "github/gpt-4o" in models
+        assert "github/claude" in models
+        assert "github/llama" in models
+
+    def test_github_models_not_detected_without_token(self, monkeypatch):
+        from agents.code_review_agent import _available_models
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        models = _available_models()
+        assert not any(m.startswith("github/") for m in models)
+
+    def test_github_models_take_priority_over_direct_keys(self, monkeypatch):
+        from agents.code_review_agent import _available_models
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_fake")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
+        models = _available_models()
+        # github models should appear before openai
+        github_indices = [i for i, m in enumerate(models) if m.startswith("github/")]
+        openai_indices = [i for i, m in enumerate(models) if m == "openai"]
+        assert github_indices and openai_indices
+        assert max(github_indices) < min(openai_indices)

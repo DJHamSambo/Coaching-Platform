@@ -14,10 +14,26 @@ Review dimensions
 
 Multi-model objectivity
 -----------------------
-The agent calls up to three AI models (OpenAI GPT-4o, Anthropic Claude, Google
-Gemini) concurrently and aggregates their findings.  Findings flagged by 2 or
-more models are elevated to *consensus* status and receive the highest
-remediation priority.
+The agent calls multiple AI models and aggregates their findings.  Findings
+flagged by 2 or more models are elevated to *consensus* status and receive
+the highest remediation priority.
+
+Preferred backend — GitHub Copilot Models
+-----------------------------------------
+A single ``GITHUB_TOKEN`` (available to all GitHub Copilot subscribers) unlocks
+three distinct models through the GitHub Models inference endpoint:
+
+* ``github/gpt-4o``    — OpenAI GPT-4o via GitHub
+* ``github/claude``    — Anthropic Claude Sonnet via GitHub
+* ``github/llama``     — Meta Llama 4 Scout via GitHub
+
+Set ``GITHUB_TOKEN`` in ``.env`` and the agent auto-selects all three,
+providing full consensus analysis without any separate paid API keys.
+
+Alternative backends (optional)
+--------------------------------
+Direct API keys are also supported as fallback:
+    OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY
 
 Agent self-improvement
 ----------------------
@@ -30,11 +46,12 @@ Usage
     python agents/code_review_agent.py --commit HEAD
     python agents/code_review_agent.py --commit abc123 --base main
     python agents/code_review_agent.py --diff-file /tmp/my.patch
-    python agents/code_review_agent.py --commit HEAD --models openai anthropic
+    python agents/code_review_agent.py --commit HEAD --models github/gpt-4o github/claude
     python agents/code_review_agent.py --commit HEAD --update-docs
 
 Environment variables
 ---------------------
+    GITHUB_TOKEN        — required for github/* models (recommended)
     OPENAI_API_KEY      — required for openai model
     ANTHROPIC_API_KEY   — required for anthropic model
     GEMINI_API_KEY      — required for gemini model
@@ -53,6 +70,24 @@ import urllib.request
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+
+
+def _load_dotenv(repo_path: Path) -> None:
+    """Load key=value pairs from .env in repo root into os.environ (no-op if absent)."""
+    env_file = repo_path / ".env"
+    if not env_file.exists():
+        return
+    # Read as bytes then decode, stripping UTF-8 BOM if PowerShell wrote one
+    raw = env_file.read_bytes().decode("utf-8-sig")
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:   # env var takes precedence over .env
+            os.environ[key] = value
 from typing import Iterator
 
 
@@ -435,6 +470,54 @@ def review_gemini(diff_files: list[DiffFile], model_id: str = "gemini-2.5-flash"
 
 
 # ---------------------------------------------------------------------------
+# GitHub Models backend  (OpenAI-compatible, single GITHUB_TOKEN)
+# ---------------------------------------------------------------------------
+
+# Models available through the GitHub Models inference endpoint.
+# Each is a different provider/architecture — ideal for multi-model consensus.
+_GITHUB_MODELS: dict[str, str] = {
+    "github/gpt-4o":  "gpt-4o",
+    "github/claude":  "claude-sonnet-4-5",
+    "github/llama":   "meta-llama-4-scout",
+}
+_GITHUB_ENDPOINT = "https://models.inference.ai.azure.com/chat/completions"
+
+
+def _review_github_model(diff_files: list[DiffFile], key: str, model_id: str) -> ModelReview:
+    """Call a single model through the GitHub Models inference API."""
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        raise RuntimeError("GITHUB_TOKEN not set")
+    prompt  = _build_review_prompt(diff_files, key)
+    payload = {
+        "model": model_id,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2,
+        "max_tokens": 4096,
+    }
+    raw  = _http_post(
+        _GITHUB_ENDPOINT,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        payload=payload,
+    )
+    data    = json.loads(raw)
+    content = data["choices"][0]["message"]["content"]
+    return _parse_model_response(content, key)
+
+
+def review_github_gpt4o(diff_files: list[DiffFile]) -> ModelReview:
+    return _review_github_model(diff_files, "github/gpt-4o", _GITHUB_MODELS["github/gpt-4o"])
+
+
+def review_github_claude(diff_files: list[DiffFile]) -> ModelReview:
+    return _review_github_model(diff_files, "github/claude", _GITHUB_MODELS["github/claude"])
+
+
+def review_github_llama(diff_files: list[DiffFile]) -> ModelReview:
+    return _review_github_model(diff_files, "github/llama", _GITHUB_MODELS["github/llama"])
+
+
+# ---------------------------------------------------------------------------
 # Core agent
 # ---------------------------------------------------------------------------
 
@@ -453,14 +536,19 @@ class CodeReviewAgent:
       run so documentation stays current.
     """
 
-    VERSION          = "1.0.0"
+    VERSION          = "1.1.0"
     REPORT_FILENAME  = "code-review-report.md"
     DOCS_FILENAME    = "docs/code-review-agent.md"
 
     MODEL_REGISTRY: dict[str, callable] = {
-        "openai":    review_openai,
-        "anthropic": review_anthropic,
-        "gemini":    review_gemini,
+        # GitHub Copilot Models — single GITHUB_TOKEN, three architectures
+        "github/gpt-4o":  review_github_gpt4o,
+        "github/claude":  review_github_claude,
+        "github/llama":   review_github_llama,
+        # Direct provider keys (optional fallback)
+        "openai":         review_openai,
+        "anthropic":      review_anthropic,
+        "gemini":         review_gemini,
     }
 
     # ------------------------------------------------------------------
@@ -733,6 +821,24 @@ class CodeReviewAgent:
             "git check-in.  It analyses changed files across five dimensions and aggregates findings",
             "from multiple AI models to produce objective, consensus-driven feedback.",
             "",
+            "## Recommended setup — GitHub Copilot Models",
+            "",
+            "A single `GITHUB_TOKEN` (available to all GitHub Copilot subscribers) unlocks three",
+            "distinct model architectures through the GitHub Models inference endpoint — ideal for",
+            "multi-model consensus without needing separate provider API keys.",
+            "",
+            "Add to `.env` in the repo root:",
+            "",
+            "```",
+            "GITHUB_TOKEN=ghp_...",
+            "```",
+            "",
+            "| Model key | Model | Architecture |",
+            "|---|---|---|",
+            "| `github/gpt-4o` | GPT-4o | OpenAI transformer |",
+            "| `github/claude` | Claude Sonnet | Anthropic constitutional AI |",
+            "| `github/llama` | Meta Llama 4 Scout | Open-weight transformer |",
+            "",
             "## Review dimensions",
             "",
             "| Dimension | What is checked |",
@@ -745,16 +851,18 @@ class CodeReviewAgent:
             "",
             "## Multi-model objectivity",
             "",
-            "The agent calls up to three AI models and aggregates their findings:",
+            "Findings flagged by **≥ 2 models** are promoted to *consensus* status and receive",
+            "the highest remediation priority in the report.",
             "",
-            "| Key | Model | API key env var |",
+            "## Alternative backends (optional)",
+            "",
+            "Direct provider API keys are also supported:",
+            "",
+            "| Key | Model | Env var |",
             "|---|---|---|",
             "| `openai` | GPT-4o | `OPENAI_API_KEY` |",
             "| `anthropic` | Claude Opus | `ANTHROPIC_API_KEY` |",
             "| `gemini` | Gemini 2.5 Flash | `GEMINI_API_KEY` |",
-            "",
-            "Findings flagged by **≥ 2 models** are promoted to *consensus* status and receive",
-            "the highest remediation priority in the report.",
             "",
             "## Agent self-improvement",
             "",
@@ -765,7 +873,7 @@ class CodeReviewAgent:
             "## Usage",
             "",
             "```bash",
-            "# Review HEAD against its parent",
+            "# Review HEAD against its parent (uses all available models automatically)",
             "python agents/code_review_agent.py --commit HEAD",
             "",
             "# Review a specific commit against a branch",
@@ -775,7 +883,7 @@ class CodeReviewAgent:
             "python agents/code_review_agent.py --diff-file /tmp/my.patch",
             "",
             "# Use only specific models",
-            "python agents/code_review_agent.py --commit HEAD --models openai anthropic",
+            "python agents/code_review_agent.py --commit HEAD --models github/gpt-4o github/claude",
             "",
             "# Regenerate this documentation",
             "python agents/code_review_agent.py --commit HEAD --update-docs",
@@ -802,9 +910,10 @@ class CodeReviewAgent:
             "## Environment variables",
             "",
             "```",
-            "OPENAI_API_KEY      — required for openai model",
-            "ANTHROPIC_API_KEY   — required for anthropic model",
-            "GEMINI_API_KEY      — required for gemini model",
+            "GITHUB_TOKEN        — recommended: unlocks github/gpt-4o, github/claude, github/llama",
+            "OPENAI_API_KEY      — optional: direct OpenAI access",
+            "ANTHROPIC_API_KEY   — optional: direct Anthropic access",
+            "GEMINI_API_KEY      — optional: direct Google Gemini access",
             "```",
             "",
             "## Notes",
@@ -823,8 +932,16 @@ class CodeReviewAgent:
 # ---------------------------------------------------------------------------
 
 def _available_models() -> list[str]:
-    """Return model keys for which an API key is configured."""
+    """Return model keys for which credentials are configured.
+
+    GitHub Models (GITHUB_TOKEN) take priority — they provide three distinct
+    model architectures without needing separate provider API keys.
+    """
     available = []
+    # GitHub Models — one token, three models for consensus
+    if os.environ.get("GITHUB_TOKEN"):
+        available.extend(["github/gpt-4o", "github/claude", "github/llama"])
+    # Direct provider keys as fallback
     if os.environ.get("OPENAI_API_KEY"):
         available.append("openai")
     if os.environ.get("ANTHROPIC_API_KEY"):
@@ -850,6 +967,8 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_path = Path(args.repo).resolve()
+    _load_dotenv(repo_path)   # load .env before key checks
+
     commit    = args.commit
     base      = args.base or f"{commit}~1"
     diff_file = Path(args.diff_file) if args.diff_file else None
@@ -857,8 +976,11 @@ def main() -> int:
 
     if not models:
         print(
-            "[error] No AI model API keys found.  Set at least one of:\n"
-            "  OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY",
+            "[error] No AI credentials found.  Set at least one of:\n"
+            "  GITHUB_TOKEN       — recommended (unlocks GPT-4o, Claude, Llama via GitHub Copilot)\n"
+            "  OPENAI_API_KEY     — direct OpenAI access\n"
+            "  ANTHROPIC_API_KEY  — direct Anthropic access\n"
+            "  GEMINI_API_KEY     — direct Google Gemini access",
             file=sys.stderr,
         )
         return 1
