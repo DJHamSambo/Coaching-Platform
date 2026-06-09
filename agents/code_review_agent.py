@@ -616,6 +616,7 @@ def _review_github_model(diff_files: list[DiffFile], key: str, model_id: str) ->
     # Each element is a list[DiffFile] batch waiting to be reviewed.
     pending: list[list[DiffFile]] = [list(diff_files)]
     batch_reviews: list[ModelReview] = []
+    skipped_paths: list[str] = []
 
     while pending:
         batch = pending.pop()
@@ -627,9 +628,10 @@ def _review_github_model(diff_files: list[DiffFile], key: str, model_id: str) ->
             if "HTTP 413" not in str(exc):
                 raise
             if len(batch) == 1:
-                # Single file is too large — skip rather than infinite loop.
+                # Single file is too large — record explicitly so callers know.
+                skipped_paths.append(batch[0].path)
                 print(
-                    f"[warn] {key}: '{batch[0].path}' too large for context window, skipping",
+                    f"[warn] {key}: '{batch[0].path}' exceeds context window, skipping",
                     file=sys.stderr,
                 )
                 continue
@@ -641,9 +643,19 @@ def _review_github_model(diff_files: list[DiffFile], key: str, model_id: str) ->
     if not batch_reviews:
         raise RuntimeError(f"{key}: no batches completed — all files exceeded context window")
 
-    if len(batch_reviews) == 1:
-        return batch_reviews[0]
-    return _merge_model_review_batches(batch_reviews, key)
+    result = batch_reviews[0] if len(batch_reviews) == 1 else _merge_model_review_batches(batch_reviews, key)
+
+    # Append skipped-file notice so callers are explicitly informed.
+    if skipped_paths:
+        skipped_note = f" [SKIPPED — too large for context: {', '.join(skipped_paths)}]"
+        result = ModelReview(
+            model=result.model,
+            findings=result.findings,
+            summary=result.summary + skipped_note,
+            score=result.score,
+            raw=result.raw,
+        )
+    return result
 
 
 def review_github_gpt4o(diff_files: list[DiffFile]) -> ModelReview:
@@ -1182,3 +1194,11 @@ if __name__ == "__main__":
 # Issue     : Potential secret leakage
 # Agreed by : github/gpt-4o-mini, github/llama
 # Suggestion: Implement a more secure error handling mechanism that does not expose sensitive information and ensure the token is validated before use.
+
+
+# CODE-REVIEW-AGENT PATCH NOTE
+# Dimension : security
+# Severity  : high
+# Issue     : Potential secret leakage
+# Agreed by : github/llama, github/gpt-4o-mini
+# Suggestion: Implement stricter validation for the GitHub token and ensure that it is never logged or printed in any form.
