@@ -517,7 +517,7 @@ class GitFlowAgent:
         _logger.info("Fix instructions → %s", out_path)
         return out_path
 
-    def _write_fix_instructions(
+    def merge_feature_into_master(
         self,
         feature_name: str,
         execute: bool = False,
