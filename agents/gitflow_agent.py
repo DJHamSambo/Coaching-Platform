@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 import subprocess
@@ -25,6 +26,9 @@ from agents.code_review_agent import (  # noqa: E402
     _available_models as _available_review_models,
     _load_dotenv as _load_review_dotenv,
 )
+
+_logger = logging.getLogger(__name__)
+logging.basicConfig(format="[%(levelname)s] %(message)s", level=logging.INFO)
 
 # ---------------------------------------------------------------------------
 # CI gate types
@@ -342,10 +346,9 @@ class GitFlowAgent:
         models = _available_review_models()
 
         if not models:
-            print(
-                "[ci] No AI credentials found — skipping code review gate.\n"
-                "[ci] Set GITHUB_TOKEN in .env to enable CI gating.",
-                file=sys.stderr,
+            _logger.warning(
+                "No AI credentials found — skipping code review gate. "
+                "Set GITHUB_TOKEN in .env to enable CI gating."
             )
             return CIResult(
                 passed=True, score=0.0, models_used=[],
@@ -353,7 +356,7 @@ class GitFlowAgent:
                 fix_instructions_path=None,
             )
 
-        print(f"[ci] Running code review: {feature_branch} → {base_branch}", file=sys.stderr)
+        _logger.info("Running code review: %s → %s", feature_branch, base_branch)
         agent = _CodeReviewAgent()
         result: _ReviewResult = agent.review(
             repo_path=self.repo_path,
@@ -369,6 +372,21 @@ class GitFlowAgent:
         high     = len(by_sev[_Severity.HIGH])
         medium   = len(by_sev[_Severity.MEDIUM])
         low      = len(by_sev[_Severity.LOW])
+
+        # Require at least one model to have succeeded; if every model failed
+        # we cannot vouch for code quality and must block the merge.
+        if not result.model_reviews:
+            _logger.error(
+                "All AI models failed — cannot assess code quality. "
+                "Merge blocked until at least one model completes a review. "
+                "Check GITHUB_TOKEN validity and network connectivity."
+            )
+            return CIResult(
+                passed=False, score=0.0, models_used=[],
+                critical=0, high=0, medium=0, low=0,
+                fix_instructions_path=None,
+            )
+
         passed   = (critical + high + medium) == 0
 
         fix_path: Path | None = None
@@ -496,7 +514,7 @@ class GitFlowAgent:
 
         out_path = self.repo_path / "review-fix-instructions.md"
         out_path.write_text("\n".join(lines), encoding="utf-8")
-        print(f"[ci] Fix instructions → {out_path}", file=sys.stderr)
+        _logger.info("Fix instructions → %s", out_path)
         return out_path
 
     def merge_feature_into_master(
@@ -515,13 +533,15 @@ class GitFlowAgent:
         # Pass skip_ci=True (or --skip-ci on CLI) only in emergencies.
         if execute and not skip_ci:
             ci_result = self.run_code_review_ci(feature_branch, self.master_branch)
-            print(f"[ci] {ci_result.summary()}", file=sys.stderr)
-            if not ci_result.passed:
-                print(
-                    f"[ci] MERGE BLOCKED — resolve all Critical/High/Medium findings.\n"
-                    f"[ci] Fix instructions: {ci_result.fix_instructions_path}\n"
-                    f"[ci] Developer agents: fix findings → commit → push → re-run merge.",
-                    file=sys.stderr,
+            if ci_result.passed:
+                _logger.info(ci_result.summary())
+            else:
+                _logger.error(ci_result.summary())
+                _logger.error(
+                    "MERGE BLOCKED — resolve all Critical/High/Medium findings. "
+                    "Fix instructions: %s. "
+                    "Developer agents: fix findings → commit → push → re-run merge.",
+                    ci_result.fix_instructions_path,
                 )
                 raise CIBlockedError(
                     f"Code review gate failed: "
@@ -637,7 +657,7 @@ def main() -> int:
     if args.run_ci:
         feature_branch = f"feature/{GitFlowAgent._slugify(args.feature)}"
         ci_result = agent.run_code_review_ci(feature_branch, args.master_branch)
-        print(f"[ci] {ci_result.summary()}", file=sys.stderr)
+        _logger.info(ci_result.summary())
         print(json.dumps(ci_result.to_dict(), indent=2))
         return 0 if ci_result.passed else 2
 
