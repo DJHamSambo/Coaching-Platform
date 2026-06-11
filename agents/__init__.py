@@ -5,6 +5,13 @@ from .code_review_agent import AgentPatch, CodeReviewAgent, ConsensusIssue, Diff
 from .frontend_developer_agent import BuildResult, FrontendDeveloperAgent, ParsedRequirements, TechnologyDecision
 from .gitflow_agent import GitFlowAgent, PullRequestRequest, PullRequestResult
 from .requirements_agent import RequirementsAgent, RequirementsResult, SourceDocument
+from .ui_ux_agent import (
+    ApprovalResult,
+    ImplementationCheckResult,
+    Recommendation,
+    ReviewResult as UIUXReviewResult,
+    UIUXAgent,
+)
 
 __all__ = [
     "AgentPatch",
@@ -27,4 +34,9 @@ __all__ = [
     "ReviewResult",
     "SourceDocument",
     "TechnologyDecision",
+    "ApprovalResult",
+    "ImplementationCheckResult",
+    "Recommendation",
+    "UIUXAgent",
+    "UIUXReviewResult",
 ]

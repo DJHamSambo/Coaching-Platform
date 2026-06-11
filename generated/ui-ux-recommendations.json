@@ -1,0 +1,42 @@
+[
+  {
+    "id": "UX-001",
+    "title": "Introduce visible focus states across interactive controls",
+    "category": "accessibility",
+    "priority": "high",
+    "effort": "small",
+    "rationale": "No explicit :focus-visible styling detected. Keyboard users need strong focus indicators to navigate confidently.",
+    "wcag_refs": [
+      "2.4.7 Focus Visible",
+      "2.1.1 Keyboard"
+    ],
+    "trend_refs": [
+      "inclusive interaction patterns",
+      "high-contrast focus rings"
+    ],
+    "target_files": [
+      "src/styles.css"
+    ],
+    "approved": false
+  },
+  {
+    "id": "UX-002",
+    "title": "Add purposeful motion and reduced-motion support",
+    "category": "interaction-design",
+    "priority": "medium",
+    "effort": "small",
+    "rationale": "No meaningful motion cues were found. Add restrained transitions for hierarchy and feedback, and include reduced-motion media query support.",
+    "wcag_refs": [
+      "2.2.2 Pause, Stop, Hide",
+      "2.3.3 Animation from Interactions"
+    ],
+    "trend_refs": [
+      "staggered reveal patterns",
+      "reduced-motion preferences"
+    ],
+    "target_files": [
+      "src/styles.css"
+    ],
+    "approved": false
+  }
+]
