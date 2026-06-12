@@ -153,7 +153,6 @@ class GitFlowPlan:
     feature_branch: str
     commands: list[list[str]]
     feature_pull_request: PullRequestResult
-    release_pull_request: PullRequestResult
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -166,14 +165,6 @@ class GitFlowPlan:
                 "base": self.feature_pull_request.request.base,
                 "url": self.feature_pull_request.url,
                 "number": self.feature_pull_request.number,
-            },
-            "release_pull_request": {
-                "mode": self.release_pull_request.mode,
-                "title": self.release_pull_request.request.title,
-                "head": self.release_pull_request.request.head,
-                "base": self.release_pull_request.request.base,
-                "url": self.release_pull_request.url,
-                "number": self.release_pull_request.number,
             },
         }
 
@@ -193,7 +184,7 @@ class BranchCleanupPlan:
 
 
 @dataclass(frozen=True)
-class MergeToMasterPlan:
+class MergeToMainPlan:
     feature_branch: str
     merge_commands: list[list[str]]
     cleanup: BranchCleanupPlan | None
@@ -206,6 +197,10 @@ class MergeToMasterPlan:
         }
 
 
+# Backward-compatible type alias for older integrations.
+MergeToMasterPlan = MergeToMainPlan
+
+
 def _local_branch_exists(repo_path: "Path", branch: str) -> bool:
     """Return True if *branch* exists as a local branch in the given repo."""
     result = subprocess.run(
@@ -215,18 +210,49 @@ def _local_branch_exists(repo_path: "Path", branch: str) -> bool:
     return result.returncode == 0
 
 
+def _remote_branch_exists(repo_path: "Path", branch: str) -> bool:
+    """Return True if *branch* exists as a remote-tracking branch."""
+    result = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "--verify", f"origin/{branch}"],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 class GitFlowAgent:
     def __init__(
         self,
         repo_path: str | Path,
-        dev_branch: str = "dev",
-        master_branch: str = "master",
+        main_branch: str = "main",
         pr_backend: PullRequestBackend | None = None,
     ) -> None:
         self.repo_path = Path(repo_path)
-        self.dev_branch = dev_branch
-        self.master_branch = master_branch
+        self.main_branch = main_branch
         self.pr_backend = pr_backend or GitHubPullRequestBackend.from_environment() or DryRunPullRequestBackend()
+
+    def _run_git(
+        self,
+        args: list[str],
+        *,
+        check: bool = True,
+        capture_output: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        # Pre-seed answers to avoid blocking prompts on Windows branch-ref cleanup.
+        return subprocess.run(
+            ["git", "-C", str(self.repo_path), *args],
+            check=check,
+            capture_output=capture_output,
+            text=True,
+            input="n\n",
+        )
+
+    def _has_staged_changes(self) -> bool:
+        result = self._run_git(["diff", "--cached", "--quiet"], check=False)
+        return result.returncode != 0
+
+    def _is_ancestor(self, older_ref: str, newer_ref: str) -> bool:
+        result = self._run_git(["merge-base", "--is-ancestor", older_ref, newer_ref], check=False)
+        return result.returncode == 0
 
     def process_change(
         self,
@@ -239,8 +265,8 @@ class GitFlowAgent:
         feature_branch = f"feature/{self._slugify(feature_name)}"
         commands = [
             ["git", "-C", str(self.repo_path), "fetch", "origin"],
-            ["git", "-C", str(self.repo_path), "checkout", self.dev_branch],
-            ["git", "-C", str(self.repo_path), "pull", "--ff-only", "origin", self.dev_branch],
+            ["git", "-C", str(self.repo_path), "checkout", self.main_branch],
+            ["git", "-C", str(self.repo_path), "pull", "--ff-only", "origin", self.main_branch],
             ["git", "-C", str(self.repo_path), "checkout", "-b", feature_branch],
         ]
         if stage_all:
@@ -253,43 +279,39 @@ class GitFlowAgent:
         )
 
         if execute:
-            for command in commands:
-                subprocess.run(command, check=True)
+            self._run_git(["fetch", "origin"])
+            self._run_git(["checkout", self.main_branch])
+            self._run_git(["pull", "--ff-only", "origin", self.main_branch])
+
+            if _local_branch_exists(self.repo_path, feature_branch):
+                self._run_git(["checkout", feature_branch])
+            else:
+                self._run_git(["checkout", "-b", feature_branch])
+
+            if stage_all:
+                self._run_git(["add", "-A"])
+
+            if self._has_staged_changes():
+                self._run_git(["commit", "-m", commit_message])
+            else:
+                _logger.info("No staged changes detected; skipping commit.")
+
+            # Always push so reruns update upstream tracking and remote branch state.
+            self._run_git(["push", "-u", "origin", feature_branch])
 
         feature_pr = self._create_pull_request(
             PullRequestRequest(
-                title=f"Merge {feature_branch} into {self.dev_branch}",
+                title=f"Merge {feature_branch} into {self.main_branch}",
                 body=change_summary,
                 head=feature_branch,
-                base=self.dev_branch,
-            )
-        )
-        release_pr = self._create_pull_request(
-            PullRequestRequest(
-                title=f"Promote {self.dev_branch} into {self.master_branch}",
-                body=f"Release changes for: {change_summary}",
-                head=self.dev_branch,
-                base=self.master_branch,
+                base=self.main_branch,
             )
         )
         return GitFlowPlan(
             feature_branch=feature_branch,
             commands=commands,
             feature_pull_request=feature_pr,
-            release_pull_request=release_pr,
         )
-
-    def sync_master_back_to_dev(self, execute: bool = False) -> list[list[str]]:
-        commands = [
-            ["git", "-C", str(self.repo_path), "checkout", self.dev_branch],
-            ["git", "-C", str(self.repo_path), "pull", "--ff-only", "origin", self.dev_branch],
-            ["git", "-C", str(self.repo_path), "merge", "--ff-only", self.master_branch],
-            ["git", "-C", str(self.repo_path), "push", "origin", self.dev_branch],
-        ]
-        if execute:
-            for command in commands:
-                subprocess.run(command, check=True)
-        return commands
 
     def cleanup_merged_feature_branch(
         self,
@@ -308,15 +330,38 @@ class GitFlowAgent:
             remote_commands.append(["git", "-C", str(self.repo_path), "push", "origin", "--delete", feature_branch])
 
         if execute:
-            subprocess.run(["git", "-C", str(self.repo_path), "fetch", "origin"], check=True)
+            self._run_git(["fetch", "origin"])
             # Use origin/branch for ancestor check so it works in fresh clones without local tracking branches
-            ancestor_ref = feature_branch if _local_branch_exists(self.repo_path, feature_branch) else f"origin/{feature_branch}"
-            subprocess.run(
-                ["git", "-C", str(self.repo_path), "merge-base", "--is-ancestor", ancestor_ref, self.master_branch],
-                check=True,
-            )
-            for command in local_commands + remote_commands:
-                subprocess.run(command, check=True, capture_output=True)
+            if _local_branch_exists(self.repo_path, feature_branch):
+                ancestor_ref = feature_branch
+            elif _remote_branch_exists(self.repo_path, feature_branch):
+                ancestor_ref = f"origin/{feature_branch}"
+            else:
+                _logger.info("Feature branch %s does not exist locally or remotely; cleanup is idempotent no-op.", feature_branch)
+                return BranchCleanupPlan(
+                    feature_branch=feature_branch,
+                    local_commands=local_commands,
+                    remote_commands=remote_commands,
+                )
+
+            if not self._is_ancestor(ancestor_ref, self.main_branch):
+                raise RuntimeError(
+                    f"Cannot clean branch {feature_branch}: it is not merged into {self.main_branch}."
+                )
+
+            for command in local_commands:
+                result = self._run_git(command[3:], check=False, capture_output=True)
+                if result.returncode != 0:
+                    _logger.warning("Local branch cleanup skipped for %s: %s", feature_branch, (result.stderr or "").strip())
+
+            for command in remote_commands:
+                result = self._run_git(command[3:], check=False, capture_output=True)
+                if result.returncode != 0:
+                    stderr = (result.stderr or "").lower()
+                    if "remote ref does not exist" in stderr:
+                        _logger.info("Remote branch %s already deleted.", feature_branch)
+                    else:
+                        _logger.warning("Remote branch cleanup skipped for %s: %s", feature_branch, (result.stderr or "").strip())
 
         return BranchCleanupPlan(
             feature_branch=feature_branch,
@@ -517,7 +562,7 @@ class GitFlowAgent:
         _logger.info("Fix instructions → %s", out_path)
         return out_path
 
-    def merge_feature_into_master(
+    def merge_feature_into_main(
         self,
         feature_name: str,
         execute: bool = False,
@@ -525,14 +570,14 @@ class GitFlowAgent:
         delete_local: bool = True,
         delete_remote: bool = True,
         skip_ci: bool = False,
-    ) -> MergeToMasterPlan:
+    ) -> MergeToMainPlan:
         feature_branch = f"feature/{self._slugify(feature_name)}"
 
         # --- CI gate ---------------------------------------------------
         # When actually executing, run the code review before touching main.
         # Pass skip_ci=True (or --skip-ci on CLI) only in emergencies.
         if execute and not skip_ci:
-            ci_result = self.run_code_review_ci(feature_branch, self.master_branch)
+            ci_result = self.run_code_review_ci(feature_branch, self.main_branch)
             if ci_result.passed:
                 _logger.info(ci_result.summary())
             else:
@@ -552,15 +597,29 @@ class GitFlowAgent:
 
         merge_commands = [
             ["git", "-C", str(self.repo_path), "fetch", "origin"],
-            ["git", "-C", str(self.repo_path), "checkout", self.master_branch],
-            ["git", "-C", str(self.repo_path), "pull", "--ff-only", "origin", self.master_branch],
+            ["git", "-C", str(self.repo_path), "checkout", self.main_branch],
+            ["git", "-C", str(self.repo_path), "pull", "--ff-only", "origin", self.main_branch],
             ["git", "-C", str(self.repo_path), "merge", "--no-ff", f"origin/{feature_branch}"],
-            ["git", "-C", str(self.repo_path), "push", "origin", self.master_branch],
+            ["git", "-C", str(self.repo_path), "push", "origin", self.main_branch],
         ]
 
         if execute:
-            for command in merge_commands:
-                subprocess.run(command, check=True)
+            self._run_git(["fetch", "origin"])
+            self._run_git(["checkout", self.main_branch])
+            self._run_git(["pull", "--ff-only", "origin", self.main_branch])
+
+            upstream_feature = f"origin/{feature_branch}"
+            local_exists = _local_branch_exists(self.repo_path, feature_branch)
+            remote_exists = _remote_branch_exists(self.repo_path, feature_branch)
+
+            if remote_exists and not self._is_ancestor(upstream_feature, self.main_branch):
+                self._run_git(["merge", "--no-ff", upstream_feature])
+                self._run_git(["push", "origin", self.main_branch])
+            elif local_exists and not self._is_ancestor(feature_branch, self.main_branch):
+                self._run_git(["merge", "--no-ff", feature_branch])
+                self._run_git(["push", "origin", self.main_branch])
+            else:
+                _logger.info("Feature branch %s is already merged into %s; skipping merge/push.", feature_branch, self.main_branch)
 
         cleanup_plan: BranchCleanupPlan | None = None
         if delete_feature_branch:
@@ -571,10 +630,29 @@ class GitFlowAgent:
                 delete_remote=delete_remote,
             )
 
-        return MergeToMasterPlan(
+        return MergeToMainPlan(
             feature_branch=feature_branch,
             merge_commands=merge_commands,
             cleanup=cleanup_plan,
+        )
+
+    # Backward-compatibility shim for earlier API name.
+    def merge_feature_into_master(
+        self,
+        feature_name: str,
+        execute: bool = False,
+        delete_feature_branch: bool = True,
+        delete_local: bool = True,
+        delete_remote: bool = True,
+        skip_ci: bool = False,
+    ) -> MergeToMainPlan:
+        return self.merge_feature_into_main(
+            feature_name=feature_name,
+            execute=execute,
+            delete_feature_branch=delete_feature_branch,
+            delete_local=delete_local,
+            delete_remote=delete_remote,
+            skip_ci=skip_ci,
         )
 
     @staticmethod
@@ -592,33 +670,27 @@ class GitFlowAgent:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run a GitFlow-style change plan using dev and master branches.")
+    parser = argparse.ArgumentParser(description="Run a GitFlow-style change plan using a main-based workflow.")
     parser.add_argument("--repo", default=".", help="Repository path.")
     parser.add_argument("--feature", required=True, help="Feature or change name.")
     parser.add_argument("--commit-message", default="", help="Commit message for the feature branch.")
     parser.add_argument("--summary", default="", help="Summary for the generated pull requests.")
-    parser.add_argument("--dev-branch", default="dev", help="Development branch name.")
-    parser.add_argument("--master-branch", default="master", help="Production branch name.")
+    parser.add_argument("--main-branch", default="main", help="Main branch name.")
     parser.add_argument("--execute", action="store_true", help="Run git commands instead of producing a dry-run plan.")
-    parser.add_argument(
-        "--sync-master-back",
-        action="store_true",
-        help="Sync master back into the dev branch after release work is complete.",
-    )
     parser.add_argument(
         "--cleanup-feature-branch",
         action="store_true",
         help="Clean up a merged feature branch (local and/or remote).",
     )
     parser.add_argument(
-        "--merge-feature-into-master",
+        "--merge-feature-into-main",
         action="store_true",
-        help="Merge a feature branch into master and optionally delete that feature branch.",
+        help="Merge a feature branch into main and optionally delete that feature branch.",
     )
     parser.add_argument(
         "--no-delete-feature-branch",
         action="store_true",
-        help="When merging into master, keep the feature branch after merge.",
+        help="When merging into main, keep the feature branch after merge.",
     )
     parser.add_argument(
         "--no-delete-local",
@@ -647,16 +719,11 @@ def main() -> int:
     args = _build_parser().parse_args()
     agent = GitFlowAgent(
         repo_path=args.repo,
-        dev_branch=args.dev_branch,
-        master_branch=args.master_branch,
+        main_branch=args.main_branch,
     )
-    if args.sync_master_back:
-        print(json.dumps({"commands": agent.sync_master_back_to_dev(execute=args.execute)}, indent=2))
-        return 0
-
     if args.run_ci:
         feature_branch = f"feature/{GitFlowAgent._slugify(args.feature)}"
-        ci_result = agent.run_code_review_ci(feature_branch, args.master_branch)
+        ci_result = agent.run_code_review_ci(feature_branch, args.main_branch)
         _logger.info(ci_result.summary())
         print(json.dumps(ci_result.to_dict(), indent=2))
         return 0 if ci_result.passed else 2
@@ -671,9 +738,9 @@ def main() -> int:
         print(json.dumps(cleanup_plan.to_dict(), indent=2))
         return 0
 
-    if args.merge_feature_into_master:
+    if args.merge_feature_into_main:
         try:
-            merge_plan = agent.merge_feature_into_master(
+            merge_plan = agent.merge_feature_into_main(
                 feature_name=args.feature,
                 execute=args.execute,
                 delete_feature_branch=not args.no_delete_feature_branch,
