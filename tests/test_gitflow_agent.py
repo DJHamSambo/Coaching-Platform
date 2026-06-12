@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from agents.gitflow_agent import CIResult, DryRunPullRequestBackend, GitFlowAgent, PullRequestResult
+from agents.gitflow_agent import AutoImplementResult, CIResult, DryRunPullRequestBackend, GitFlowAgent, PullRequestResult
 
 
 class GitFlowAgentTests(unittest.TestCase):
@@ -148,6 +148,115 @@ class GitFlowAgentTests(unittest.TestCase):
 
         self.assertEqual(cleanup_plan.feature_branch, "feature/requirements-agent")
         self.assertEqual(run_git_mock.call_count, 1)
+
+    @patch.object(GitFlowAgent, "run_code_review_ci")
+    @patch.object(GitFlowAgent, "_dispatch_developer_fixers", return_value=True)
+    @patch.object(GitFlowAgent, "_checkout_feature_branch")
+    @patch.object(GitFlowAgent, "_has_staged_changes", return_value=True)
+    @patch.object(GitFlowAgent, "_run_git")
+    def test_auto_implement_retries_ci_and_commits(
+        self,
+        run_git_mock: Mock,
+        _has_staged: Mock,
+        _checkout: Mock,
+        _dispatch: Mock,
+        run_ci_mock: Mock,
+    ) -> None:
+        run_git_mock.return_value = Mock(returncode=0, stdout="", stderr="")
+        failing_ci = CIResult(
+            passed=False,
+            score=4.0,
+            models_used=["test"],
+            critical=0,
+            high=1,
+            medium=0,
+            low=0,
+            fix_instructions_path=None,
+        )
+        passing_ci = CIResult(
+            passed=True,
+            score=8.0,
+            models_used=["test"],
+            critical=0,
+            high=0,
+            medium=0,
+            low=1,
+            fix_instructions_path=None,
+        )
+        run_ci_mock.return_value = passing_ci
+
+        agent = GitFlowAgent(
+            repo_path="/tmp/workspace/DJHamSambo/Coaching-Platform",
+            pr_backend=DryRunPullRequestBackend(),
+        )
+
+        result = agent._auto_implement_ci_fixes(
+            feature_branch="feature/requirements-agent",
+            initial_ci=failing_ci,
+            max_attempts=2,
+            auto_commit_message="fix: auto-implement code review findings",
+        )
+
+        self.assertTrue(result.final_ci.passed)
+        self.assertTrue(result.committed)
+        self.assertEqual(result.attempts, 1)
+        all_calls = [" ".join(call.args[0]) for call in run_git_mock.call_args_list]
+        self.assertTrue(any(c.startswith("commit -m ") for c in all_calls))
+        self.assertTrue(any(c == "push origin feature/requirements-agent" for c in all_calls))
+
+    @patch.object(GitFlowAgent, "_run_git")
+    @patch.object(GitFlowAgent, "_is_ancestor", return_value=True)
+    @patch("agents.gitflow_agent._remote_branch_exists", return_value=False)
+    @patch("agents.gitflow_agent._local_branch_exists", return_value=False)
+    @patch.object(GitFlowAgent, "_auto_implement_ci_fixes")
+    @patch.object(GitFlowAgent, "run_code_review_ci")
+    def test_merge_feature_into_main_uses_auto_implement_when_enabled(
+        self,
+        run_ci_mock: Mock,
+        auto_impl_mock: Mock,
+        _local_exists: Mock,
+        _remote_exists: Mock,
+        _is_ancestor: Mock,
+        run_git_mock: Mock,
+    ) -> None:
+        run_git_mock.return_value = Mock(returncode=0, stdout="", stderr="")
+        failing_ci = CIResult(
+            passed=False,
+            score=4.0,
+            models_used=["test"],
+            critical=0,
+            high=1,
+            medium=0,
+            low=0,
+            fix_instructions_path=None,
+        )
+        passing_ci = CIResult(
+            passed=True,
+            score=8.0,
+            models_used=["test"],
+            critical=0,
+            high=0,
+            medium=0,
+            low=1,
+            fix_instructions_path=None,
+        )
+        run_ci_mock.return_value = failing_ci
+        auto_impl_mock.return_value = AutoImplementResult(attempts=1, committed=True, final_ci=passing_ci)
+
+        agent = GitFlowAgent(
+            repo_path="/tmp/workspace/DJHamSambo/Coaching-Platform",
+            pr_backend=DryRunPullRequestBackend(),
+        )
+
+        plan = agent.merge_feature_into_main(
+            feature_name="Requirements Agent",
+            execute=True,
+            auto_implement=True,
+            max_auto_attempts=2,
+        )
+
+        self.assertIsNotNone(plan.auto_implement)
+        auto_impl_mock.assert_called_once()
 
     def test_end_to_end_main_flow_process_merge_and_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

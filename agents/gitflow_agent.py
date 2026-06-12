@@ -82,6 +82,20 @@ class CIBlockedError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class AutoImplementResult:
+    attempts: int
+    committed: bool
+    final_ci: CIResult
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "attempts": self.attempts,
+            "committed": self.committed,
+            "final_ci": self.final_ci.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
 class PullRequestRequest:
     title: str
     body: str
@@ -188,12 +202,14 @@ class MergeToMainPlan:
     feature_branch: str
     merge_commands: list[list[str]]
     cleanup: BranchCleanupPlan | None
+    auto_implement: AutoImplementResult | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
             "feature_branch": self.feature_branch,
             "merge_commands": self.merge_commands,
             "cleanup": self.cleanup.to_dict() if self.cleanup else None,
+            "auto_implement": self.auto_implement.to_dict() if self.auto_implement else None,
         }
 
 
@@ -237,6 +253,10 @@ class GitFlowAgent:
         check: bool = True,
         capture_output: bool = False,
     ) -> subprocess.CompletedProcess[str]:
+        if not args:
+            raise ValueError("git args must not be empty")
+        if any("\n" in part or "\r" in part or "\x00" in part for part in args):
+            raise ValueError("git args contain disallowed control characters")
         # Pre-seed answers to avoid blocking prompts on Windows branch-ref cleanup.
         return subprocess.run(
             ["git", "-C", str(self.repo_path), *args],
@@ -246,6 +266,15 @@ class GitFlowAgent:
             input="n\n",
         )
 
+    def _run_command(self, args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            args,
+            cwd=self.repo_path,
+            check=check,
+            capture_output=True,
+            text=True,
+        )
+
     def _has_staged_changes(self) -> bool:
         result = self._run_git(["diff", "--cached", "--quiet"], check=False)
         return result.returncode != 0
@@ -253,6 +282,118 @@ class GitFlowAgent:
     def _is_ancestor(self, older_ref: str, newer_ref: str) -> bool:
         result = self._run_git(["merge-base", "--is-ancestor", older_ref, newer_ref], check=False)
         return result.returncode == 0
+
+    def _worktree_has_changes(self) -> bool:
+        result = self._run_git(["status", "--porcelain"], capture_output=True)
+        return bool((result.stdout or "").strip())
+
+    def _checkout_feature_branch(self, feature_branch: str) -> None:
+        if _local_branch_exists(self.repo_path, feature_branch):
+            self._run_git(["checkout", feature_branch])
+            return
+        if _remote_branch_exists(self.repo_path, feature_branch):
+            self._run_git(["checkout", "-B", feature_branch, f"origin/{feature_branch}"])
+            return
+        raise RuntimeError(f"Feature branch {feature_branch} not found locally or on origin.")
+
+    def _dispatch_developer_fixers(self, fix_instructions_path: Path | None) -> bool:
+        """Attempt auto-remediation by invoking developer agents when possible.
+
+        Returns True when at least one fixer was invoked successfully.
+        """
+        if not fix_instructions_path or not fix_instructions_path.exists():
+            return False
+
+        content = fix_instructions_path.read_text(encoding="utf-8")
+        requirements_file = self.repo_path / "docs" / "coaching-platform-requirements.md"
+        if not requirements_file.exists():
+            _logger.warning("Auto-implement skipped: requirements file not found at %s", requirements_file)
+            return False
+
+        invoked = False
+
+        if "## Frontend findings" in content:
+            result = self._run_command(
+                [
+                    sys.executable,
+                    "agents/frontend_developer_agent.py",
+                    "--requirements-file",
+                    str(requirements_file),
+                    "--output",
+                    "generated/frontend-app",
+                    "--project-name",
+                    "frontend-app",
+                ],
+                check=False,
+            )
+            if result.returncode == 0:
+                invoked = True
+            else:
+                _logger.warning("Frontend developer auto-fix failed: %s", (result.stderr or "").strip())
+
+        if "## Backend findings" in content:
+            result = self._run_command(
+                [
+                    sys.executable,
+                    "agents/backend_developer_agent.py",
+                    "--requirements-file",
+                    str(requirements_file),
+                    "--output",
+                    "generated/backend-app",
+                    "--project-name",
+                    "backend-app",
+                    "--base-url",
+                    "http://localhost:8000",
+                ],
+                check=False,
+            )
+            if result.returncode == 0:
+                invoked = True
+            else:
+                _logger.warning("Backend developer auto-fix failed: %s", (result.stderr or "").strip())
+
+        # For general/agent findings we currently rely on code_review_agent patchers
+        # (already enabled in run_code_review_ci via patch_agents=True).
+        return invoked
+
+    def _auto_implement_ci_fixes(
+        self,
+        *,
+        feature_branch: str,
+        initial_ci: CIResult,
+        max_attempts: int,
+        auto_commit_message: str,
+    ) -> AutoImplementResult:
+        attempts = 0
+        committed = False
+        current_ci = initial_ci
+
+        while attempts < max_attempts and not current_ci.passed:
+            attempts += 1
+            _logger.info("Auto-implement attempt %d/%d", attempts, max_attempts)
+
+            self._checkout_feature_branch(feature_branch)
+            before_changes = self._worktree_has_changes()
+            invoked = self._dispatch_developer_fixers(current_ci.fix_instructions_path)
+            after_changes = self._worktree_has_changes()
+
+            # If no developer agent ran and no changes exist, there is nothing to apply.
+            if not invoked and not after_changes and not before_changes:
+                _logger.warning("Auto-implement made no changes; stopping retries.")
+                break
+
+            self._run_git(["add", "-A"])
+            if self._has_staged_changes():
+                msg = auto_commit_message if max_attempts == 1 else f"{auto_commit_message} (attempt {attempts})"
+                self._run_git(["commit", "-m", msg])
+                self._run_git(["push", "origin", feature_branch])
+                committed = True
+            else:
+                _logger.info("Auto-implement staged no net changes; skipping commit.")
+
+            current_ci = self.run_code_review_ci(feature_branch, self.main_branch)
+
+        return AutoImplementResult(attempts=attempts, committed=committed, final_ci=current_ci)
 
     def process_change(
         self,
@@ -570,14 +711,26 @@ class GitFlowAgent:
         delete_local: bool = True,
         delete_remote: bool = True,
         skip_ci: bool = False,
+        auto_implement: bool = False,
+        max_auto_attempts: int = 1,
+        auto_commit_message: str = "fix: auto-implement code review findings",
     ) -> MergeToMainPlan:
         feature_branch = f"feature/{self._slugify(feature_name)}"
+        auto_result: AutoImplementResult | None = None
 
         # --- CI gate ---------------------------------------------------
         # When actually executing, run the code review before touching main.
         # Pass skip_ci=True (or --skip-ci on CLI) only in emergencies.
         if execute and not skip_ci:
             ci_result = self.run_code_review_ci(feature_branch, self.main_branch)
+            if not ci_result.passed and auto_implement:
+                auto_result = self._auto_implement_ci_fixes(
+                    feature_branch=feature_branch,
+                    initial_ci=ci_result,
+                    max_attempts=max_auto_attempts,
+                    auto_commit_message=auto_commit_message,
+                )
+                ci_result = auto_result.final_ci
             if ci_result.passed:
                 _logger.info(ci_result.summary())
             else:
@@ -634,6 +787,7 @@ class GitFlowAgent:
             feature_branch=feature_branch,
             merge_commands=merge_commands,
             cleanup=cleanup_plan,
+            auto_implement=auto_result,
         )
 
     # Backward-compatibility shim for earlier API name.
@@ -645,6 +799,9 @@ class GitFlowAgent:
         delete_local: bool = True,
         delete_remote: bool = True,
         skip_ci: bool = False,
+        auto_implement: bool = False,
+        max_auto_attempts: int = 1,
+        auto_commit_message: str = "fix: auto-implement code review findings",
     ) -> MergeToMainPlan:
         return self.merge_feature_into_main(
             feature_name=feature_name,
@@ -653,6 +810,9 @@ class GitFlowAgent:
             delete_local=delete_local,
             delete_remote=delete_remote,
             skip_ci=skip_ci,
+            auto_implement=auto_implement,
+            max_auto_attempts=max_auto_attempts,
+            auto_commit_message=auto_commit_message,
         )
 
     @staticmethod
@@ -708,6 +868,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Bypass the code review CI gate when merging (emergency use only).",
     )
     parser.add_argument(
+        "--auto-implement",
+        action="store_true",
+        help="When CI fails during merge, attempt developer-agent auto remediation before failing.",
+    )
+    parser.add_argument(
+        "--max-auto-attempts",
+        type=int,
+        default=1,
+        help="Maximum auto-implement remediation attempts when --auto-implement is enabled.",
+    )
+    parser.add_argument(
+        "--auto-commit-message",
+        default="fix: auto-implement code review findings",
+        help="Commit message used for auto-implemented remediation commits.",
+    )
+    parser.add_argument(
         "--run-ci",
         action="store_true",
         help="Run the code review CI gate standalone and report results without merging.",
@@ -747,6 +923,9 @@ def main() -> int:
                 delete_local=not args.no_delete_local,
                 delete_remote=not args.no_delete_remote,
                 skip_ci=args.skip_ci,
+                auto_implement=args.auto_implement,
+                max_auto_attempts=max(1, args.max_auto_attempts),
+                auto_commit_message=args.auto_commit_message,
             )
         except CIBlockedError as exc:
             print(

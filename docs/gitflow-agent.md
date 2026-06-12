@@ -40,6 +40,18 @@ python agents/gitflow_agent.py \
   --execute
 ```
 
+Merge with auto-remediation attempts when CI finds blocking issues:
+
+```bash
+python agents/gitflow_agent.py \
+  --repo . \
+  --feature "requirements-agent" \
+  --merge-feature-into-main \
+  --execute \
+  --auto-implement \
+  --max-auto-attempts 2
+```
+
 Run the code-review CI gate standalone:
 
 ```bash
@@ -55,6 +67,12 @@ Cleanup options:
 - `--no-delete-local` skips local branch deletion.
 - `--no-delete-remote` skips remote branch deletion.
 
+Auto-implement options:
+
+- `--auto-implement` enables automatic remediation attempts when CI blocks merge.
+- `--max-auto-attempts` controls retry count (default: `1`).
+- `--auto-commit-message` sets commit message for auto-remediation commits.
+
 ## Notes
 
 - The default mode is a safe dry run.
@@ -63,3 +81,4 @@ Cleanup options:
 - In cleanup mode with `--execute`, the agent verifies the feature branch is merged into the configured `--main-branch` before deleting it.
 - CI merge gating blocks merges when any Critical, High, or Medium code-review findings are present.
 - Execution is idempotent for common reruns: existing feature branches are reused, empty commit attempts are skipped, already-merged branches skip merge/push, and missing branches during cleanup are treated as no-op.
+- With `--auto-implement`, the agent attempts to invoke developer agents based on findings ownership (frontend/backend), commits and pushes remediation changes, then re-runs CI before deciding merge pass/fail.
