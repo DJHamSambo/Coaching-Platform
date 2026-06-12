@@ -2,17 +2,17 @@
 
 ## Purpose
 
-`/tmp/workspace/DJHamSambo/Coaching-Platform/agents/gitflow_agent.py` orchestrates a lightweight GitFlow process using `dev` and `master` branches.
+`agents/gitflow_agent.py` orchestrates a lightweight, main-based GitFlow process.
 
 ## What it does
 
-- Creates a feature branch from `dev`
+- Creates a feature branch from `main`
 - Stages and commits changes
 - Pushes the feature branch
-- Creates a pull request from the feature branch into `dev`
-- Creates a release pull request from `dev` into `master`
-- Optionally syncs `master` back into `dev`
-- Optionally cleans up merged feature branches (local and remote)
+- Creates a pull request from the feature branch into `main`
+- Runs the code review agent as a CI merge gate before merging
+- Merges the feature branch into `main` when CI passes
+- Deletes merged feature branches (local and remote)
 
 ## Pull request behaviour
 
@@ -23,33 +23,42 @@
 ## Usage
 
 ```bash
-python /tmp/workspace/DJHamSambo/Coaching-Platform/agents/gitflow_agent.py \
-  --repo /tmp/workspace/DJHamSambo/Coaching-Platform \
+python agents/gitflow_agent.py \
+  --repo . \
   --feature "requirements-agent" \
   --commit-message "feat: add requirements agent" \
   --summary "Add the requirements distillation agent and its documentation."
 ```
 
-Sync `master` back to `dev` after a release:
+Merge a reviewed feature into `main` and clean up the feature branch:
 
 ```bash
-python /tmp/workspace/DJHamSambo/Coaching-Platform/agents/gitflow_agent.py \
-  --repo /tmp/workspace/DJHamSambo/Coaching-Platform \
-  --feature "unused" \
-  --commit-message "unused" \
-  --summary "unused" \
-  --sync-master-back
+python agents/gitflow_agent.py \
+  --repo . \
+  --feature "requirements-agent" \
+  --merge-feature-into-main \
+  --execute
 ```
 
-Clean up a merged feature branch:
+Merge with auto-remediation attempts when CI finds blocking issues:
 
 ```bash
-python /tmp/workspace/DJHamSambo/Coaching-Platform/agents/gitflow_agent.py \
-  --repo /tmp/workspace/DJHamSambo/Coaching-Platform \
+python agents/gitflow_agent.py \
+  --repo . \
   --feature "requirements-agent" \
-  --commit-message "unused" \
-  --summary "unused" \
-  --cleanup-feature-branch
+  --merge-feature-into-main \
+  --execute \
+  --auto-implement \
+  --max-auto-attempts 2
+```
+
+Run the code-review CI gate standalone:
+
+```bash
+python agents/gitflow_agent.py \
+  --repo . \
+  --feature "requirements-agent" \
+  --run-ci
 ```
 
 Cleanup options:
@@ -58,9 +67,18 @@ Cleanup options:
 - `--no-delete-local` skips local branch deletion.
 - `--no-delete-remote` skips remote branch deletion.
 
+Auto-implement options:
+
+- `--auto-implement` enables automatic remediation attempts when CI blocks merge.
+- `--max-auto-attempts` controls retry count (default: `1`).
+- `--auto-commit-message` sets commit message for auto-remediation commits.
+
 ## Notes
 
 - The default mode is a safe dry run.
 - Passing `--execute` runs the git commands directly.
-- The agent keeps the branch names configurable through `--dev-branch` and `--master-branch`.
-- In cleanup mode with `--execute`, the agent verifies the feature branch is merged into the configured `--master-branch` before deleting it.
+- The mainline branch is configurable through `--main-branch` (default: `main`).
+- In cleanup mode with `--execute`, the agent verifies the feature branch is merged into the configured `--main-branch` before deleting it.
+- CI merge gating blocks merges when any Critical, High, or Medium code-review findings are present.
+- Execution is idempotent for common reruns: existing feature branches are reused, empty commit attempts are skipped, already-merged branches skip merge/push, and missing branches during cleanup are treated as no-op.
+- With `--auto-implement`, the agent attempts to invoke developer agents based on findings ownership (frontend/backend), commits and pushes remediation changes, then re-runs CI before deciding merge pass/fail.
