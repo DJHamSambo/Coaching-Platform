@@ -484,7 +484,7 @@ _GITHUB_MODELS: dict[str, str] = {
     "github/llama":       "Meta-Llama-3.1-405B-Instruct",
 }
 # Allowlist of valid CI model keys — derived dynamically from _GITHUB_MODELS to stay in sync.
-_ALLOWED_GITHUB_MODEL_KEYS: frozenset[str] = frozenset(_GITHUB_MODELS.keys())
+_ALLOWLIST_GITHUB_MODEL_KEYS: frozenset[str] = frozenset(_GITHUB_MODELS.keys())
 # Default model used for CI reviews.  Change via CODE_REVIEW_GITHUB_MODEL env var.
 _DEFAULT_GITHUB_MODEL = "github/gpt-4o"
 # Default endpoint — override via GITHUB_MODELS_ENDPOINT env var for custom deployments.
@@ -1163,8 +1163,19 @@ def _default_github_model() -> str:
     latency is acceptable.
     """
     raw = os.environ.get("CODE_REVIEW_GITHUB_MODEL", _DEFAULT_GITHUB_MODEL).strip()
-    # Allowlist-validate against known model keys; never echo the raw value.
-    if raw not in _ALLOWED_GITHUB_MODEL_KEYS:
+    # Step 1: Reject values that contain characters outside the allowed set (a-z, A-Z, 0-9, /, -).
+    # This guards against injection attempts before the allowlist lookup.
+    if not re.fullmatch(r"[a-zA-Z0-9/_-]+", raw):
+        # SAFETY: do not include raw value in this message to prevent log exposure.
+        print(
+            "[warn] CODE_REVIEW_GITHUB_MODEL contains disallowed characters; "
+            f"falling back to {_DEFAULT_GITHUB_MODEL}",
+            file=sys.stderr,
+        )
+        return _DEFAULT_GITHUB_MODEL
+    # Step 2: Allowlist-validate against known model keys; never echo the raw value.
+    if raw not in _ALLOWLIST_GITHUB_MODEL_KEYS:
+        # SAFETY: do not include raw value in this message to prevent log exposure.
         print(
             "[warn] CODE_REVIEW_GITHUB_MODEL is not a recognised GitHub model key; "
             f"falling back to {_DEFAULT_GITHUB_MODEL}",
