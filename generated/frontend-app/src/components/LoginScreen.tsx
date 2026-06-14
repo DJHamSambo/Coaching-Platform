@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { clearToken, login, register, setToken } from '../api';
+import { clearToken, login, register, setCurrentUsername, setToken } from '../api';
 
 interface LoginScreenProps {
   onAuthenticated: (username: string) => void;
@@ -25,6 +25,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
       setToken(tokens.access);
       clearToken(); // clear any stale state
       setToken(tokens.access);
+      setCurrentUsername(username);
       onAuthenticated(username);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');

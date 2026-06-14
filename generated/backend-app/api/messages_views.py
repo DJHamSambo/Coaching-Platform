@@ -17,7 +17,14 @@ class MessagesListView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         owner = _resolve_owner(self.request)
-        return self.serializer_class.Meta.model.objects.filter(owner=owner).order_by("-created_at")
+        queryset = self.serializer_class.Meta.model.objects.filter(owner=owner)
+        plan_id = self.request.query_params.get("plan_id")
+        task_id = self.request.query_params.get("task_id")
+        if plan_id:
+            queryset = queryset.filter(plan_id=plan_id)
+        if task_id:
+            queryset = queryset.filter(task_id=task_id)
+        return queryset.order_by("-created_at")
 
     def perform_create(self, serializer):
         serializer.save(owner=_resolve_owner(self.request))

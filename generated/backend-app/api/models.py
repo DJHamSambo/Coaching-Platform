@@ -4,26 +4,74 @@ from django.contrib.auth.models import User
 from django.db import models
 
 
-class Task(models.Model):
+class Coachee(models.Model):
+    """A coachee managed by coaches within the platform."""
+    name = models.CharField(max_length=255)
+    email = models.EmailField(blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+    added_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="coachees")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class CoachingPlan(models.Model):
+    """A coaching plan owned by a coach and assigned to a coachee."""
     STATUS_CHOICES = [
-        ("backlog", "Backlog"),
+        ("todo", "To Do"),
         ("in_progress", "In Progress"),
         ("done", "Done"),
     ]
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
+    goal = models.TextField(blank=True, default="", help_text="Overall coaching goal for this plan")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="todo")
+    target_date = models.DateField(null=True, blank=True)
+    coachee = models.ForeignKey(Coachee, on_delete=models.SET_NULL, null=True, blank=True, related_name="plans")
+    coach = models.ForeignKey(User, on_delete=models.CASCADE, related_name="coaching_plans")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["target_date"]
+
+    def __str__(self) -> str:
+        return self.title
+
+
+class Task(models.Model):
+    """An action item within a coaching plan."""
+    STATUS_CHOICES = [
+        ("backlog", "Backlog"),
+        ("in_progress", "In Progress"),
+        ("done", "Done"),
+    ]
+    plan = models.ForeignKey(CoachingPlan, on_delete=models.CASCADE, related_name="actions", null=True, blank=True)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="backlog")
     assignee = models.CharField(max_length=100, default="Coachee")
+    order = models.PositiveIntegerField(default=0, help_text="Sequence position within the plan")
     due_date = models.DateField(null=True, blank=True)
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="tasks")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        ordering = ["order", "created_at"]
+
+    def __str__(self) -> str:
+        return self.title
+
 
 class Message(models.Model):
+    """A discussion message on an action or coaching plan."""
     title = models.CharField(max_length=500, help_text="The discussion message text")
+    plan = models.ForeignKey(CoachingPlan, on_delete=models.CASCADE, related_name="messages", null=True, blank=True)
     task_id = models.IntegerField(null=True, blank=True)
     author = models.CharField(max_length=100, default="Coach")
+    mentions = models.CharField(max_length=500, blank=True, default="", help_text="Comma-separated @mention names")
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="messages")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

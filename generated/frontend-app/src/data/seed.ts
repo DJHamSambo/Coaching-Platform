@@ -14,8 +14,8 @@ export const initialSessions: SessionItem[] = [
 ];
 
 export const initialDiscussions: DiscussionItem[] = [
-  { id: 'discussion-1', taskId: 'task-2', author: 'Coachee', message: '@Coach can we adjust this action priority?', mentions: ['Coach'], createdAt: '2026-06-14' },
-  { id: 'discussion-2', taskId: 'task-2', author: 'Coach', message: '@Coachee yes, move outreach to this week.', mentions: ['Coachee'], createdAt: '2026-06-14' },
+  { id: 'discussion-1', taskId: 'task-2', planId: '', author: 'Coachee', message: '@Coach can we adjust this action priority?', mentions: ['Coach'], createdAt: '2026-06-14' },
+  { id: 'discussion-2', taskId: 'task-2', planId: '', author: 'Coach', message: '@Coachee yes, move outreach to this week.', mentions: ['Coachee'], createdAt: '2026-06-14' },
 ];
 
 export const initialInsights: InsightItem[] = [

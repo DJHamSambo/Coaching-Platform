@@ -7,6 +7,32 @@
   --line: #d3e1df;
 }
 
+.kanban {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.kanban-col {
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 14px;
+  min-height: 120px;
+}
+
+.kanban-col h3 {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
+@media (max-width: 640px) {
+  .kanban { grid-template-columns: 1fr; }
+}
+
 * { box-sizing: border-box; }
 
 body {
