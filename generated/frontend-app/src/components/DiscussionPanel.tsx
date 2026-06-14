@@ -44,6 +44,7 @@ export function DiscussionPanel({ discussions, tasks, onAddDiscussion }: Discuss
             onAddDiscussion({
               id: `discussion-${Date.now()}`,
               taskId,
+              planId: '',
               author,
               message: trimmed,
               mentions,

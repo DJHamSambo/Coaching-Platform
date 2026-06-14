@@ -4,7 +4,11 @@ import { InsightsJournal } from './components/InsightsJournal';
 import { KanbanBoard } from './components/KanbanBoard';
 import { ResourceLibrary } from './components/ResourceLibrary';
 import { SessionPlanner } from './components/SessionPlanner';
+import { PlanList } from './components/PlanList';
+import { PlanDetail } from './components/PlanDetail';
+import { CoacheesManager } from './components/CoacheesManager';
       import { createDiscussion, createTask, listDiscussions, listTasks, updateTaskStatus } from './api';
+import { createPlan, listCoachees, listPlans } from './api';
 import {
   initialDiscussions,
   initialInsights,
@@ -14,9 +18,11 @@ import {
   requirementTitle,
 } from './data/seed';
 import type { DiscussionItem, InsightItem, PlanTask, ResourceItem, SessionItem, TaskStatus } from './types';
+import type { Coachee, CoachingPlan } from './types';
 
 const MODULES = [
-  { key: 'planning', label: 'Planning Board', enabled: true },
+  { key: 'plans', label: 'Coaching Plans', enabled: true },
+  { key: 'coachees', label: 'Coachees', enabled: true },
   { key: 'sessions', label: 'Sessions', enabled: false },
   { key: 'discussions', label: 'Discussions', enabled: true },
   { key: 'insights', label: 'Insights & Journal', enabled: false },
@@ -32,11 +38,38 @@ export default function App() {
   const [tasks, setTasks] = useState<PlanTask[]>(initialTasks);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [tasksError, setTasksError] = useState<string | null>(null);
+  const [plans, setPlans] = useState<CoachingPlan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [plansError, setPlansError] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<CoachingPlan | null>(null);
+  const [coachees, setCoachees] = useState<Coachee[]>([]);
+  const [coacheesLoading, setCoacheesLoading] = useState(true);
+  const [coacheesError, setCoacheesError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionItem[]>(initialSessions);
   const [discussions, setDiscussions] = useState<DiscussionItem[]>(initialDiscussions);
   const [discussionsError, setDiscussionsError] = useState<string | null>(null);
   const [insights, setInsights] = useState<InsightItem[]>(initialInsights);
   const [resources, setResources] = useState<ResourceItem[]>(initialResources);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPlansLoading(true);
+    listPlans()
+      .then((data) => { if (!cancelled) { setPlans(data); setPlansError(null); } })
+      .catch(() => { if (!cancelled) setPlansError('Could not load plans. Showing local data.'); })
+      .finally(() => { if (!cancelled) setPlansLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCoacheesLoading(true);
+    listCoachees()
+      .then((data) => { if (!cancelled) { setCoachees(data); setCoacheesError(null); } })
+      .catch(() => { if (!cancelled) setCoacheesError('Could not load coachees.'); })
+      .finally(() => { if (!cancelled) setCoacheesLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,6 +116,16 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  async function handleCreatePlan(planData: Omit<CoachingPlan, 'id' | 'createdAt' | 'coacheeName'>): Promise<void> {
+    try {
+      const created = await createPlan(planData);
+      setPlans((prev) => [...prev, created].sort((a, b) => a.targetDate.localeCompare(b.targetDate)));
+      setPlansError(null);
+    } catch {
+      setPlansError('Could not create plan. Please try again.');
+    }
+  }
 
   async function handleMoveTask(taskId: string, status: TaskStatus): Promise<void> {
     const previous = tasks;
@@ -148,20 +191,32 @@ export default function App() {
       </nav>
 
       <section className='workspace'>
-        {activeModule === 'planning' && (
-          <>
-            {tasksLoading && <p className='muted'>Loading tasks...</p>}
-            {tasksError && <p className='muted'>{tasksError}</p>}
-            <KanbanBoard
-              tasks={tasks}
-              onMoveTask={(taskId: string, status: TaskStatus) => {
-                void handleMoveTask(taskId, status);
-              }}
-              onAddTask={(task: PlanTask) => {
-                void handleAddTask(task);
-              }}
-            />
-          </>
+        {activeModule === 'plans' && !selectedPlan && (
+          <PlanList
+            plans={plans}
+            coachees={coachees}
+            onSelectPlan={setSelectedPlan}
+            onCreatePlan={(data) => { void handleCreatePlan(data); }}
+            loading={plansLoading}
+            error={plansError}
+          />
+        )}
+
+        {activeModule === 'plans' && selectedPlan && (
+          <PlanDetail
+            plan={selectedPlan}
+            coachees={coachees}
+            onBack={() => setSelectedPlan(null)}
+          />
+        )}
+
+        {activeModule === 'coachees' && (
+          <CoacheesManager
+            coachees={coachees}
+            onAdded={(c) => setCoachees((prev) => [...prev, c])}
+            loading={coacheesLoading}
+            error={coacheesError}
+          />
         )}
 
         {activeModule === 'sessions' && (

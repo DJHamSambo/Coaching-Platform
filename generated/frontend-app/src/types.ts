@@ -1,4 +1,35 @@
 export type TaskStatus = 'backlog' | 'inProgress' | 'done';
+export type PlanStatus = 'todo' | 'inProgress' | 'done';
+
+export interface Coachee {
+  id: string;
+  name: string;
+  email: string;
+  notes: string;
+}
+
+export interface CoachingPlan {
+  id: string;
+  title: string;
+  description: string;
+  goal: string;
+  status: PlanStatus;
+  targetDate: string;
+  coacheeId: string | null;
+  coacheeName: string | null;
+  createdAt: string;
+}
+
+export interface PlanAction {
+  id: string;
+  planId: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  assignee: string;
+  order: number;
+  dueDate: string;
+}
 
 export interface PlanTask {
   id: string;
@@ -20,6 +51,7 @@ export interface SessionItem {
 export interface DiscussionItem {
   id: string;
   taskId: string;
+  planId: string;
   author: string;
   message: string;
   mentions: string[];
