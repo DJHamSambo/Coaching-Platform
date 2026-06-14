@@ -285,8 +285,10 @@ class DiffParser:
 
 def get_diff_from_git(repo_path: Path, commit: str, base: str) -> str:
     cmd = ["git", "-C", str(repo_path), "diff", f"{base}..{commit}"]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return result.stdout
+    # Decode explicitly as UTF-8 so Windows console code pages cannot break
+    # subprocess text decoding for large/binary-adjacent diffs.
+    result = subprocess.run(cmd, capture_output=True, text=False, check=True)
+    return result.stdout.decode("utf-8", errors="replace")
 
 
 def get_diff_from_file(path: Path) -> str:
