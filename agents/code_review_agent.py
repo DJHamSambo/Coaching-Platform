@@ -1148,13 +1148,13 @@ class CodeReviewAgent:
 def _available_models() -> list[str]:
     """Return model keys for which credentials are configured.
 
-    GitHub Models (GITHUB_TOKEN) take priority — they provide three distinct
-    model architectures without needing separate provider API keys.
+    Uses github/gpt-4o as the single default CI model — reliable and fast.
+    Additional models can be requested explicitly via --models on the CLI.
     """
     available = []
-    # GitHub Models — one token, three models for consensus
+    # GitHub Models — use gpt-4o only by default to avoid slow/unreliable models
     if os.environ.get("GITHUB_TOKEN"):
-        available.extend(["github/gpt-4o", "github/gpt-4o-mini", "github/llama"])
+        available.append("github/gpt-4o")
     # Direct provider keys as fallback
     if os.environ.get("OPENAI_API_KEY"):
         available.append("openai")
