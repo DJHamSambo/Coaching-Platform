@@ -5,5 +5,5 @@ Second iteration of trying to vibe code a coaching app
 
 - [Requirements Agent](docs/requirements-agent.md)
 - [Git Flow Agent](docs/gitflow-agent.md)
-- [Frontend Developer Agent](docs/frontend-developer-agent.md)
+- [Developer Agent](docs/developer-agent.md)
 - [UI/UX Agent](docs/ui-ux-agent.md)

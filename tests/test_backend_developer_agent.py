@@ -239,12 +239,11 @@ class TestSelfDocumentation(unittest.TestCase):
         docs = agent.self_documentation_markdown()
         self.assertIn(BackendDeveloperAgent.VERSION, docs)
 
-    def test_self_documentation_contains_technology_table(self) -> None:
+    def test_self_documentation_redirects_to_unified_developer_agent(self) -> None:
         agent = BackendDeveloperAgent()
         docs = agent.self_documentation_markdown()
-        self.assertIn("FastAPI", docs)
-        self.assertIn("Django", docs)
-        self.assertIn("Express", docs)
+        self.assertIn("Deprecated", docs)
+        self.assertIn("developer_agent.py", docs)
 
     def test_self_documentation_contains_usage(self) -> None:
         agent = BackendDeveloperAgent()

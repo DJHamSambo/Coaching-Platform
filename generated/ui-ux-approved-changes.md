@@ -2,7 +2,7 @@
 
 This file is generated only after recommendation approval.
 
-## Frontend Developer Agent Instructions
+## Developer Agent Instructions
 
 - Apply UX-001: Introduce visible focus states across interactive controls
   category=accessibility; priority=high; effort=small
@@ -16,8 +16,6 @@ This file is generated only after recommendation approval.
   wcag=2.2.2 Pause, Stop, Hide, 2.3.3 Animation from Interactions
   trends=staggered reveal patterns, reduced-motion preferences
   targets=src/styles.css
-
-## Backend Developer Agent Instructions
 
 - Review approved UX recommendations for backend contract impact.
 - If a recommendation requires API metadata for accessibility (labels, status semantics, assistive hints), expose the required fields in response payloads and integration contracts.

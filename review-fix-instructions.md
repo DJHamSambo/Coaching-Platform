@@ -4,7 +4,7 @@
 > Overall quality score: **5.7/10**  
 > **Merge is BLOCKED** until all Critical, High and Medium findings are resolved.
 
-## Instructions for developer agents
+## Instructions for Developer Agent
 
 1. Fix every finding listed below (Critical → High → Medium order).
 2. Commit with message: `fix: address code review findings from CI gate`
@@ -14,7 +14,7 @@
 ---
 
 ## General / Agent findings
-**Assigned to: Fullstack Developer Agent**
+**Assigned to: Developer Agent**
 
 ### 🟠 `HIGH` — Potential command injection vulnerability in subprocess.run
 

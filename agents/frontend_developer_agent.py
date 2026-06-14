@@ -149,33 +149,17 @@ class FrontendDeveloperAgent:
     def self_documentation_markdown(self) -> str:
         return "\n".join(
             [
-                "# Frontend Developer Agent",
+          "# Frontend Developer Agent (Deprecated)",
                 "",
-                "## Purpose",
+          "This document is kept for backward compatibility.",
                 "",
-                "`agents/frontend_developer_agent.py` reads requirements markdown and generates a functional frontend scaffold.",
+          "Use the unified end-to-end Developer Agent instead:",
                 "",
-                "## Delivered modules",
-                "",
-                "- Planning board (kanban tasks with status movement)",
-                "- Session scheduler and availability requests",
-                "- Discussion threads with @mention extraction",
-                "- Insights/journal timeline",
-                "- Resource library and filtering",
-                "",
-                "## Usage",
-                "",
-                "```bash",
-                "python agents/frontend_developer_agent.py \\",
-                "  --requirements-file docs/coaching-platform-requirements.md \\",
-                "  --output generated/frontend-app \\",
-                "  --project-name coaching-frontend",
-                "```",
-                "",
-                "## Notes",
-                "",
-                "- Uses Python standard library only.",
-                "- Regenerates this doc and frontend-agent-report.md each execution so documentation stays current.",
+          "- Primary docs: `docs/developer-agent.md`",
+          "- Primary CLI: `python agents/developer_agent.py --requirements-file docs/coaching-platform-requirements.md --output generated/full-stack-app --project-name coaching-platform`",
+          "",
+          "The frontend developer agent implementation remains available as an internal building block used by the unified Developer Agent.",
+          "",
                 f"- Agent version: {self.VERSION}",
                 "",
             ]
@@ -1076,7 +1060,7 @@ export function ResourceLibrary({ resources, onAddResource }: ResourceLibraryPro
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Choose a frontend technology from requirements and generate a maintainable implementation scaffold."
+    description="(Deprecated) Generate frontend scaffold directly. Prefer agents/developer_agent.py for end-to-end runs."
     )
     parser.add_argument("--requirements-file", required=True, help="Path to markdown created by requirements_agent.py")
     parser.add_argument("--output", default="generated/frontend-app", help="Output directory for generated frontend code")
@@ -1091,6 +1075,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
+    print(
+        "WARNING: frontend_developer_agent.py is deprecated for direct use. "
+        "Use agents/developer_agent.py for end-to-end implementation.",
+        file=sys.stderr,
+    )
     requirements_path = Path(args.requirements_file)
     markdown = requirements_path.read_text(encoding="utf-8")
 
