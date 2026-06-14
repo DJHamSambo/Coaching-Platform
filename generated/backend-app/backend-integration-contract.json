@@ -3,6 +3,7 @@
   "base_url": "http://localhost:8000",
   "cors_origins": [
     "http://localhost:5173",
+    "http://localhost:5174",
     "http://localhost:4173"
   ],
   "auth_header": "Authorization: Bearer <token>",
@@ -22,26 +23,6 @@
       "method": "GET",
       "path": "/api/users/me",
       "description": "Return current user profile"
-    },
-    {
-      "method": "GET",
-      "path": "/api/sessions",
-      "description": "List sessions for the current user"
-    },
-    {
-      "method": "POST",
-      "path": "/api/sessions",
-      "description": "Create a coaching session"
-    },
-    {
-      "method": "PATCH",
-      "path": "/api/sessions/{id}",
-      "description": "Update a session"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/sessions/{id}",
-      "description": "Cancel a session"
     },
     {
       "method": "GET",
@@ -67,26 +48,6 @@
       "method": "POST",
       "path": "/api/messages",
       "description": "Post a message"
-    },
-    {
-      "method": "GET",
-      "path": "/api/resources",
-      "description": "List shared resources"
-    },
-    {
-      "method": "POST",
-      "path": "/api/resources",
-      "description": "Add a resource"
-    },
-    {
-      "method": "GET",
-      "path": "/api/insights",
-      "description": "List journal entries"
-    },
-    {
-      "method": "POST",
-      "path": "/api/insights",
-      "description": "Add a journal entry"
     }
   ]
 }

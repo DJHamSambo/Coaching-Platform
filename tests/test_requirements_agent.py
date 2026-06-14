@@ -47,6 +47,28 @@ class RequirementsAgentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             RequirementsAgent().fetch_url_text("http://127.0.0.1/spec")
 
+    def test_distills_coaching_plan_input_into_coherent_outputs(self) -> None:
+        text = (
+            "As a coach I want to be able to create one to many coaching plans for a coachee. "
+            "These should show as a list in target date order. "
+            "Each coaching plan should be able to have a title, a description, a status (to do, in progress, done) and one to many actions. "
+            "Each of the actions should be able to have a title, description, state (to do, in progress, done) as well as discussion where the coachee can @ a coach. "
+            "Actions for all in progress coaching plans should be visualised on a Kanban board with columns for the status, allowing the coachee to drag and drop actions between columns which should also update the status of the action."
+        )
+
+        result = RequirementsAgent().distill(texts=[text], title="Coaching Plan Requirements")
+
+        joined_stories = "\n".join(result.user_stories).lower()
+        joined_functional = "\n".join(result.functional_requirements).lower()
+
+        self.assertIn("as a coach, i want to create one to many coaching plans", joined_stories)
+        self.assertIn("as a coach, i want coaching plans to be shown as a list in target date order", joined_stories)
+        self.assertNotIn("as a user, i want to as a coach", joined_stories)
+
+        self.assertIn("the system shall allow coaches to create one to many coaching plans", joined_functional)
+        self.assertIn("the system shall show coaching plans as a list in target date order", joined_functional)
+        self.assertNotIn("the system shall as a coach", joined_functional)
+
 
 if __name__ == "__main__":
     unittest.main()

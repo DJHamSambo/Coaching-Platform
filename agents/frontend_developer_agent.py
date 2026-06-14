@@ -156,7 +156,7 @@ class FrontendDeveloperAgent:
           "Use the unified end-to-end Developer Agent instead:",
                 "",
           "- Primary docs: `docs/developer-agent.md`",
-          "- Primary CLI: `python agents/developer_agent.py --requirements-file docs/coaching-platform-requirements.md --output generated/full-stack-app --project-name coaching-platform`",
+              "- Primary CLI: `python agents/developer_agent.py --requirements-file docs/coaching-platform-requirements.md --output generated --backend-dir-name backend-app --frontend-dir-name frontend-app`",
           "",
           "The frontend developer agent implementation remains available as an internal building block used by the unified Developer Agent.",
           "",
@@ -178,6 +178,7 @@ class FrontendDeveloperAgent:
         files.append(self._write(root / "vite.config.ts", self._vite_config()))
         files.append(self._write(root / "index.html", self._index_html()))
         files.append(self._write(root / "src" / "main.tsx", self._main_tsx()))
+        files.append(self._write(root / "src" / "api.ts", self._api_ts()))
         files.append(self._write(root / "src" / "styles.css", self._styles_css()))
         files.append(self._write(root / "src" / "types.ts", self._types_ts()))
         files.append(self._write(root / "src" / "data" / "seed.ts", self._seed_ts(requirements)))
@@ -394,6 +395,172 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 """
 
     @staticmethod
+    def _api_ts() -> str:
+        return """// API client — talks to the Django backend at http://localhost:8000
+// All calls attach the stored JWT token automatically.
+
+import type { DiscussionItem, PlanTask, TaskStatus } from './types';
+
+const BASE_URL = 'http://127.0.0.1:8000';
+const TOKEN_KEY = 'coaching_jwt';
+
+export interface AuthTokens {
+  access: string;
+  refresh: string;
+}
+
+export interface RegisterPayload {
+  username: string;
+  password: string;
+  email?: string;
+}
+
+export interface LoginPayload {
+  username: string;
+  password: string;
+}
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+export async function register(payload: RegisterPayload): Promise<{ id: number; username: string; email: string }> {
+  return request('/api/auth/register/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function login(payload: LoginPayload): Promise<AuthTokens> {
+  return request('/api/auth/login/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> | undefined),
+  };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`${response.status} ${text}`);
+  }
+  if (response.status === 204) return undefined as unknown as T;
+  return response.json() as Promise<T>;
+}
+
+interface ApiTask {
+  id: number;
+  title: string;
+  description: string;
+  status: 'backlog' | 'in_progress' | 'done';
+  assignee: string;
+  due_date: string | null;
+}
+
+function toFrontendStatus(status: ApiTask['status']): TaskStatus {
+  if (status === 'in_progress') return 'inProgress';
+  return status;
+}
+
+function toApiStatus(status: TaskStatus): ApiTask['status'] {
+  if (status === 'inProgress') return 'in_progress';
+  return status;
+}
+
+function toPlanTask(task: ApiTask): PlanTask {
+  return {
+    id: String(task.id),
+    title: task.title,
+    description: task.description,
+    status: toFrontendStatus(task.status),
+    assignee: task.assignee,
+    dueDate: task.due_date ?? new Date().toISOString().slice(0, 10),
+  };
+}
+
+export async function listTasks(): Promise<PlanTask[]> {
+  const tasks = await request<ApiTask[]>('/api/tasks/');
+  return tasks.map(toPlanTask);
+}
+
+export async function createTask(task: Pick<PlanTask, 'title' | 'description' | 'assignee' | 'dueDate'>): Promise<PlanTask> {
+  const payload = {
+    title: task.title,
+    description: task.description,
+    status: 'backlog',
+    assignee: task.assignee,
+    due_date: task.dueDate,
+  };
+  const created = await request<ApiTask>('/api/tasks/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return toPlanTask(created);
+}
+
+export async function updateTaskStatus(taskId: string, status: TaskStatus): Promise<PlanTask> {
+  const updated = await request<ApiTask>(`/api/tasks/${taskId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: toApiStatus(status) }),
+  });
+  return toPlanTask(updated);
+}
+
+interface ApiMessage {
+  id: number;
+  title: string;
+  task_id: number | null;
+  author: string;
+  created_at: string;
+}
+
+function toDiscussionItem(message: ApiMessage): DiscussionItem {
+  const text = message.title ?? '';
+  const mentions = Array.from(new Set((text.match(/@\\w+/g) ?? []).map((token) => token.slice(1))));
+  return {
+    id: String(message.id),
+    taskId: message.task_id ? String(message.task_id) : '',
+    author: message.author,
+    message: text,
+    mentions,
+    createdAt: message.created_at.slice(0, 10),
+  };
+}
+
+export async function listDiscussions(): Promise<DiscussionItem[]> {
+  const messages = await request<ApiMessage[]>('/api/messages/');
+  return messages.map(toDiscussionItem);
+}
+
+export async function createDiscussion(payload: { taskId: string; author: string; message: string }): Promise<DiscussionItem> {
+  const created = await request<ApiMessage>('/api/messages/', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: payload.message,
+      task_id: payload.taskId ? Number(payload.taskId) : null,
+      author: payload.author,
+    }),
+  });
+  return toDiscussionItem(created);
+}
+"""
+
+    @staticmethod
     def _types_ts() -> str:
         return """export type TaskStatus = 'backlog' | 'inProgress' | 'done';
 
@@ -474,12 +641,13 @@ export const initialResources: ResourceItem[] = [
 
     def _app_tsx(self, requirements: ParsedRequirements, features: FeatureSet) -> str:
         summary = requirements.summary[0] if requirements.summary else "Generated from requirements input"
-        return f"""import {{ useMemo, useState }} from 'react';
+        return f"""import {{ useEffect, useMemo, useState }} from 'react';
 import {{ DiscussionPanel }} from './components/DiscussionPanel';
 import {{ InsightsJournal }} from './components/InsightsJournal';
 import {{ KanbanBoard }} from './components/KanbanBoard';
 import {{ ResourceLibrary }} from './components/ResourceLibrary';
 import {{ SessionPlanner }} from './components/SessionPlanner';
+      import {{ createDiscussion, createTask, listDiscussions, listTasks, updateTaskStatus }} from './api';
 import {{
   initialDiscussions,
   initialInsights,
@@ -505,10 +673,101 @@ export default function App() {{
   const [activeModule, setActiveModule] = useState<ModuleKey>(enabledModules[0]?.key ?? 'planning');
 
   const [tasks, setTasks] = useState<PlanTask[]>(initialTasks);
+  const [tasksLoading, setTasksLoading] = useState(true);
+  const [tasksError, setTasksError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionItem[]>(initialSessions);
   const [discussions, setDiscussions] = useState<DiscussionItem[]>(initialDiscussions);
+  const [discussionsError, setDiscussionsError] = useState<string | null>(null);
   const [insights, setInsights] = useState<InsightItem[]>(initialInsights);
   const [resources, setResources] = useState<ResourceItem[]>(initialResources);
+
+  useEffect(() => {{
+    let cancelled = false;
+    (async () => {{
+      try {{
+        const persisted = await listTasks();
+        if (!cancelled) {{
+          setTasks(persisted);
+          setTasksError(null);
+        }}
+      }} catch {{
+        if (!cancelled) {{
+          setTasks(initialTasks);
+          setTasksError('Showing local tasks. Backend task API is unavailable.');
+        }}
+      }} finally {{
+        if (!cancelled) {{
+          setTasksLoading(false);
+        }}
+      }}
+    }})();
+    return () => {{
+      cancelled = true;
+    }};
+  }}, []);
+
+  useEffect(() => {{
+    let cancelled = false;
+    (async () => {{
+      try {{
+        const persisted = await listDiscussions();
+        if (!cancelled) {{
+          setDiscussions(persisted);
+          setDiscussionsError(null);
+        }}
+      }} catch {{
+        if (!cancelled) {{
+          setDiscussions(initialDiscussions);
+          setDiscussionsError('Showing local discussions. Backend discussion API is unavailable.');
+        }}
+      }}
+    }})();
+    return () => {{
+      cancelled = true;
+    }};
+  }}, []);
+
+  async function handleMoveTask(taskId: string, status: TaskStatus): Promise<void> {{
+    const previous = tasks;
+    setTasks((current) => current.map((task) => (task.id === taskId ? {{ ...task, status }} : task)));
+    try {{
+      const updated = await updateTaskStatus(taskId, status);
+      setTasks((current) => current.map((task) => (task.id === taskId ? updated : task)));
+      setTasksError(null);
+    }} catch {{
+      setTasks(previous);
+      setTasksError('Unable to save task status. Please try again.');
+    }}
+  }}
+
+  async function handleAddTask(task: PlanTask): Promise<void> {{
+    try {{
+      const created = await createTask({{
+        title: task.title,
+        description: task.description,
+        assignee: task.assignee,
+        dueDate: task.dueDate,
+      }});
+      setTasks((current) => [created, ...current]);
+      setTasksError(null);
+    }} catch {{
+      setTasksError('Unable to save new task. Please try again.');
+    }}
+  }}
+
+  async function handleAddDiscussion(discussion: DiscussionItem): Promise<void> {{
+    try {{
+      const created = await createDiscussion({{
+        taskId: discussion.taskId,
+        author: discussion.author,
+        message: discussion.message,
+      }});
+      setDiscussions((current) => [created, ...current]);
+      setDiscussionsError(null);
+    }} catch {{
+      setDiscussionsError('Unable to save discussion. Please try again.');
+    }}
+  }}
 
   return (
     <main className='app-shell'>
@@ -533,13 +792,19 @@ export default function App() {{
 
       <section className='workspace'>
         {{activeModule === 'planning' && (
-          <KanbanBoard
-            tasks={{tasks}}
-            onMoveTask={{(taskId: string, status: TaskStatus) =>
-              setTasks((current) => current.map((task) => (task.id === taskId ? {{ ...task, status }} : task)))
-            }}
-            onAddTask={{(task: PlanTask) => setTasks((current) => [task, ...current])}}
-          />
+          <>
+            {{tasksLoading && <p className='muted'>Loading tasks...</p>}}
+            {{tasksError && <p className='muted'>{{tasksError}}</p>}}
+            <KanbanBoard
+              tasks={{tasks}}
+              onMoveTask={{(taskId: string, status: TaskStatus) => {{
+                void handleMoveTask(taskId, status);
+              }}}}
+              onAddTask={{(task: PlanTask) => {{
+                void handleAddTask(task);
+              }}}}
+            />
+          </>
         )}}
 
         {{activeModule === 'sessions' && (
@@ -550,11 +815,16 @@ export default function App() {{
         )}}
 
         {{activeModule === 'discussions' && (
-          <DiscussionPanel
-            discussions={{discussions}}
-            tasks={{tasks}}
-            onAddDiscussion={{(discussion: DiscussionItem) => setDiscussions((current) => [discussion, ...current])}}
-          />
+          <>
+            {{discussionsError && <p className='muted'>{{discussionsError}}</p>}}
+            <DiscussionPanel
+              discussions={{discussions}}
+              tasks={{tasks}}
+              onAddDiscussion={{(discussion: DiscussionItem) => {{
+                void handleAddDiscussion(discussion);
+              }}}}
+            />
+          </>
         )}}
 
         {{activeModule === 'insights' && (
