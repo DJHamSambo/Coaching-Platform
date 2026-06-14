@@ -554,10 +554,10 @@ class TestGitHubModelsBackend:
         monkeypatch.setenv("CODE_REVIEW_GITHUB_MODEL", "x" * 500)
         assert _default_github_model() == _DEFAULT_GITHUB_MODEL
 
-    def test_default_github_model_non_utf8_safe_chars_fall_back(self, monkeypatch):
-        """Values with non-ASCII or control characters are rejected at the char-set check."""
+    def test_default_github_model_non_ascii_chars_fall_back(self, monkeypatch):
+        """Values with non-ASCII characters are rejected at the char-set check."""
         from agents.code_review_agent import _DEFAULT_GITHUB_MODEL, _default_github_model
-        monkeypatch.setenv("CODE_REVIEW_GITHUB_MODEL", "github/gpt-4o\x00injected")
+        monkeypatch.setenv("CODE_REVIEW_GITHUB_MODEL", "github/gpt-4o\u2019bad")
         assert _default_github_model() == _DEFAULT_GITHUB_MODEL
 
     def test_default_github_model_warning_never_echoes_value(self, monkeypatch, capsys):
