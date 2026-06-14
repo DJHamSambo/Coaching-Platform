@@ -508,10 +508,41 @@ class TestGitHubModelsBackend:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("CODE_REVIEW_GITHUB_MODEL", raising=False)
         models = _available_models()
         assert "github/gpt-4o" in models
-        assert "github/gpt-4o-mini" in models
-        assert "github/llama" in models
+        # gpt-4o-mini and llama no longer appear in the default list
+        assert "github/gpt-4o-mini" not in models
+        assert "github/llama" not in models
+
+    # ------------------------------------------------------------------
+    # _default_github_model behaviour
+    # ------------------------------------------------------------------
+
+    def test_default_github_model_returns_default(self, monkeypatch):
+        from agents.code_review_agent import _DEFAULT_GITHUB_MODEL, _default_github_model
+        monkeypatch.delenv("CODE_REVIEW_GITHUB_MODEL", raising=False)
+        assert _default_github_model() == _DEFAULT_GITHUB_MODEL
+
+    def test_default_github_model_env_override_valid(self, monkeypatch):
+        from agents.code_review_agent import _default_github_model
+        monkeypatch.setenv("CODE_REVIEW_GITHUB_MODEL", "github/gpt-4o-mini")
+        assert _default_github_model() == "github/gpt-4o-mini"
+
+    def test_default_github_model_env_override_invalid_falls_back(self, monkeypatch, capsys):
+        from agents.code_review_agent import _DEFAULT_GITHUB_MODEL, _default_github_model
+        monkeypatch.setenv("CODE_REVIEW_GITHUB_MODEL", "not-a-real-model")
+        result = _default_github_model()
+        assert result == _DEFAULT_GITHUB_MODEL
+        captured = capsys.readouterr()
+        # Warning must not include the raw env-var value to avoid info leakage
+        assert "not-a-real-model" not in captured.err
+        assert "warn" in captured.err
+
+    def test_default_github_model_env_override_empty_falls_back(self, monkeypatch):
+        from agents.code_review_agent import _DEFAULT_GITHUB_MODEL, _default_github_model
+        monkeypatch.setenv("CODE_REVIEW_GITHUB_MODEL", "   ")
+        assert _default_github_model() == _DEFAULT_GITHUB_MODEL
 
     def test_github_models_not_detected_without_token(self, monkeypatch):
         from agents.code_review_agent import _available_models
