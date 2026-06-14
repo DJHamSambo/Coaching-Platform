@@ -297,7 +297,7 @@ class GitFlowAgent:
         raise RuntimeError(f"Feature branch {feature_branch} not found locally or on origin.")
 
     def _dispatch_developer_fixers(self, fix_instructions_path: Path | None) -> bool:
-        """Attempt auto-remediation by invoking developer agents when possible.
+        """Attempt auto-remediation by invoking the unified developer agent.
 
         Returns True when at least one fixer was invoked successfully.
         """
@@ -310,51 +310,38 @@ class GitFlowAgent:
             _logger.warning("Auto-implement skipped: requirements file not found at %s", requirements_file)
             return False
 
-        invoked = False
-
-        if "## Frontend findings" in content:
-            result = self._run_command(
-                [
-                    sys.executable,
-                    "agents/frontend_developer_agent.py",
-                    "--requirements-file",
-                    str(requirements_file),
-                    "--output",
-                    "generated/frontend-app",
-                    "--project-name",
-                    "frontend-app",
-                ],
-                check=False,
+        has_actionable_findings = any(
+            marker in content
+            for marker in (
+                "## Frontend findings",
+                "## Backend findings",
+                "## General / Agent findings",
+                "## Developer Agent findings",
             )
-            if result.returncode == 0:
-                invoked = True
-            else:
-                _logger.warning("Frontend developer auto-fix failed: %s", (result.stderr or "").strip())
+        )
+        if not has_actionable_findings:
+            return False
 
-        if "## Backend findings" in content:
-            result = self._run_command(
-                [
-                    sys.executable,
-                    "agents/backend_developer_agent.py",
-                    "--requirements-file",
-                    str(requirements_file),
-                    "--output",
-                    "generated/backend-app",
-                    "--project-name",
-                    "backend-app",
-                    "--base-url",
-                    "http://localhost:8000",
-                ],
-                check=False,
-            )
-            if result.returncode == 0:
-                invoked = True
-            else:
-                _logger.warning("Backend developer auto-fix failed: %s", (result.stderr or "").strip())
+        result = self._run_command(
+            [
+                sys.executable,
+                "agents/developer_agent.py",
+                "--requirements-file",
+                str(requirements_file),
+                "--output",
+                "generated/full-stack-app",
+                "--project-name",
+                "coaching-platform",
+                "--base-url",
+                "http://localhost:8000",
+            ],
+            check=False,
+        )
+        if result.returncode == 0:
+            return True
 
-        # For general/agent findings we currently rely on code_review_agent patchers
-        # (already enabled in run_code_review_ci via patch_agents=True).
-        return invoked
+        _logger.warning("Developer agent auto-fix failed: %s", (result.stderr or "").strip())
+        return False
 
     def _auto_implement_ci_fixes(
         self,
@@ -525,8 +512,7 @@ class GitFlowAgent:
         returns a :class:`CIResult`.  The merge is considered blocked if any
         Critical, High or Medium findings are present.  When blocked, a
         ``review-fix-instructions.md`` file is written to the repo root with
-        findings partitioned by developer agent responsibility (frontend /
-        backend / general).
+        findings grouped by area and assigned to the unified Developer Agent.
         """
         _load_review_dotenv(self.repo_path)
         models = _available_review_models()
@@ -595,10 +581,10 @@ class GitFlowAgent:
         result: "_ReviewResult",
         feature_branch: str,
     ) -> Path:
-        """Write ``review-fix-instructions.md`` partitioned by developer agent.
+        """Write ``review-fix-instructions.md`` grouped for the Developer Agent.
 
-        Findings are routed to the Frontend Developer Agent, Backend Developer
-        Agent, or a general Fullstack bucket based on the changed file path.
+        Findings are grouped by frontend/backend/general file area and assigned
+        to one Developer Agent.
         Consensus findings (agreed by ≥ 2 models) are highlighted at the top
         so they are fixed first.
         """
@@ -636,7 +622,7 @@ class GitFlowAgent:
             f"> Overall quality score: **{result.overall_score():.1f}/10**  ",
             "> **Merge is BLOCKED** until all Critical, High and Medium findings are resolved.",
             "",
-            "## Instructions for developer agents",
+            "## Instructions for Developer Agent",
             "",
             "1. Fix every finding listed below (Critical → High → Medium order).",
             "2. Commit with message: `fix: address code review findings from CI gate`",
@@ -694,9 +680,9 @@ class GitFlowAgent:
                 ]
             return out
 
-        lines += _render_section("Frontend findings", "Frontend Developer Agent", frontend)
-        lines += _render_section("Backend findings",  "Backend Developer Agent",  backend)
-        lines += _render_section("General / Agent findings", "Fullstack Developer Agent", general)
+        lines += _render_section("Frontend findings", "Developer Agent", frontend)
+        lines += _render_section("Backend findings",  "Developer Agent",  backend)
+        lines += _render_section("General / Agent findings", "Developer Agent", general)
 
         out_path = self.repo_path / "review-fix-instructions.md"
         out_path.write_text("\n".join(lines), encoding="utf-8")

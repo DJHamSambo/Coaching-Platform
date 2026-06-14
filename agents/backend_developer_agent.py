@@ -315,62 +315,17 @@ class BackendDeveloperAgent:
     def self_documentation_markdown(self) -> str:
         """Return up-to-date documentation for this agent."""
         return "\n".join([
-            "# Backend Developer Agent",
+            "# Backend Developer Agent (Deprecated)",
             "",
-            "## Purpose",
+            "This document is kept for backward compatibility.",
             "",
-            "`agents/backend_developer_agent.py` reads requirements markdown produced by the requirements agent,",
-            "selects the most appropriate backend technology stack, generates a fully functional backend scaffold,",
-            "and writes a frontend integration contract so the frontend developer agent can wire up cleanly.",
+            "Use the unified end-to-end Developer Agent instead:",
             "",
-            "## Technology selection",
+            "- Primary docs: `docs/developer-agent.md`",
+            "- Primary CLI: `python agents/developer_agent.py --requirements-file docs/coaching-platform-requirements.md --output generated/full-stack-app --project-name coaching-platform`",
             "",
-            "| Stack | Chosen when |",
-            "|---|---|",
-            "| Python + FastAPI | Typed async REST, data-heavy or ML adjacent requirements |",
-            "| Django + DRF | CRUD-heavy, content management, role-based access needs |",
-            "| Node.js + Express + TypeScript | Real-time, WebSocket, tight frontend coupling |",
+            "The backend developer agent implementation remains available as an internal building block used by the unified Developer Agent.",
             "",
-            "## Generated modules",
-            "",
-            "Modules are inferred from requirements text:",
-            "",
-            "- **users** — auth (JWT), registration, profile",
-            "- **sessions** — coaching session CRUD",
-            "- **tasks** — kanban/action-item CRUD",
-            "- **messages** — discussion threads",
-            "- **resources** — document/link library",
-            "- **insights** — journal/reflection entries",
-            "",
-            "## Frontend integration",
-            "",
-            "Every run writes `backend-integration-contract.json` to the output directory.",
-            "The frontend developer agent reads this file to discover base URL, CORS origins,",
-            "auth header format, and all available endpoints.",
-            "",
-            "## Usage",
-            "",
-            "```bash",
-            "python agents/backend_developer_agent.py \\",
-            "  --requirements-file docs/coaching-platform-requirements.md \\",
-            "  --output generated/backend-app \\",
-            "  --project-name coaching-backend",
-            "```",
-            "",
-            "## Options",
-            "",
-            "| Flag | Default | Description |",
-            "|---|---|---|",
-            "| `--requirements-file` | required | Path to requirements markdown |",
-            "| `--output` | `generated/backend-app` | Output directory |",
-            "| `--project-name` | `backend-app` | Project identifier used in configs |",
-            "| `--base-url` | `http://localhost:8000` | Backend base URL written to the contract |",
-            "| `--update-docs` | flag | Regenerate docs/backend-developer-agent.md |",
-            "",
-            "## Notes",
-            "",
-            "- Uses Python standard library only.",
-            "- Regenerates this doc and the run report on every execution.",
             f"- Agent version: {self.VERSION}",
             "",
         ])
@@ -1269,7 +1224,7 @@ export default router;
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate a backend scaffold from a requirements-agent markdown file."
+        description="(Deprecated) Generate a backend scaffold directly. Prefer agents/developer_agent.py for end-to-end runs."
     )
     parser.add_argument("--requirements-file", required=True, help="Path to the requirements markdown file.")
     parser.add_argument("--output", default="generated/backend-app", help="Output directory for the generated backend.")
@@ -1281,6 +1236,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
+    print(
+        "WARNING: backend_developer_agent.py is deprecated for direct use. "
+        "Use agents/developer_agent.py for end-to-end implementation.",
+        file=sys.stderr,
+    )
     agent = BackendDeveloperAgent()
 
     requirements_text = Path(args.requirements_file).read_text(encoding="utf-8")

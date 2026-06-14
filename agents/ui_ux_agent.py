@@ -408,7 +408,7 @@ class UIUXAgent:
             "",
             "This file is generated only after recommendation approval.",
             "",
-            "## Frontend Developer Agent Instructions",
+            "## Developer Agent Instructions",
             "",
         ]
 
@@ -437,8 +437,6 @@ class UIUXAgent:
 
         lines.extend(
             [
-                "## Backend Developer Agent Instructions",
-                "",
                 "- Review approved UX recommendations for backend contract impact.",
                 "- If a recommendation requires API metadata for accessibility (labels, status semantics, assistive hints), expose the required fields in response payloads and integration contracts.",
                 "- Keep endpoint behavior backward compatible unless a breaking change is explicitly approved.",

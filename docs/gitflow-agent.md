@@ -81,4 +81,4 @@ Auto-implement options:
 - In cleanup mode with `--execute`, the agent verifies the feature branch is merged into the configured `--main-branch` before deleting it.
 - CI merge gating blocks merges when any Critical, High, or Medium code-review findings are present.
 - Execution is idempotent for common reruns: existing feature branches are reused, empty commit attempts are skipped, already-merged branches skip merge/push, and missing branches during cleanup are treated as no-op.
-- With `--auto-implement`, the agent attempts to invoke developer agents based on findings ownership (frontend/backend), commits and pushes remediation changes, then re-runs CI before deciding merge pass/fail.
+- With `--auto-implement`, the agent invokes the unified Developer Agent for end-to-end remediation, commits and pushes changes, then re-runs CI before deciding merge pass/fail.
