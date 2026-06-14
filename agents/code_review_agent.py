@@ -483,6 +483,10 @@ _GITHUB_MODELS: dict[str, str] = {
     "github/gpt-4o-mini": "gpt-4o-mini",
     "github/llama":       "Meta-Llama-3.1-405B-Instruct",
 }
+# Allowlist of valid CI model keys — derived dynamically from _GITHUB_MODELS to stay in sync.
+_ALLOWLIST_GITHUB_MODEL_KEYS: frozenset[str] = frozenset(_GITHUB_MODELS.keys())
+# Default model used for CI reviews.  Change via CODE_REVIEW_GITHUB_MODEL env var.
+_DEFAULT_GITHUB_MODEL = "github/gpt-4o"
 # Default endpoint — override via GITHUB_MODELS_ENDPOINT env var for custom deployments.
 _GITHUB_ENDPOINT_DEFAULT = "https://models.inference.ai.azure.com/chat/completions"
 # Max output tokens per request.  Override via GITHUB_MODELS_MAX_TOKENS env var.
@@ -1145,17 +1149,57 @@ class CodeReviewAgent:
 # CLI
 # ---------------------------------------------------------------------------
 
+def _default_github_model() -> str:
+    """Return the single GitHub model used for CI reviews.
+
+    Override by setting CODE_REVIEW_GITHUB_MODEL to any key in
+    ``_ALLOWED_GITHUB_MODEL_KEYS``.  Invalid values are rejected with a
+    warning and fall back to ``_DEFAULT_GITHUB_MODEL``.
+
+    github/gpt-4o-mini and github/llama are available via ``--models`` on
+    the CLI but excluded from the default CI path because they exhibited
+    inconsistent response latency on large diffs, causing the CI gate to
+    stall.  The env-var override lets teams opt in to those models when
+    latency is acceptable.
+    """
+    raw = os.environ.get("CODE_REVIEW_GITHUB_MODEL", _DEFAULT_GITHUB_MODEL).strip()
+    # Step 1: Reject values that contain characters outside the allowed set (a-z, A-Z, 0-9, /, -).
+    # This guards against injection attempts before the allowlist lookup.
+    if not re.fullmatch(r"[a-zA-Z0-9/_-]+", raw):
+        # SAFETY: do not include raw value in this message to prevent log exposure.
+        print(
+            "[warn] CODE_REVIEW_GITHUB_MODEL contains disallowed characters; "
+            f"falling back to {_DEFAULT_GITHUB_MODEL}",
+            file=sys.stderr,
+        )
+        return _DEFAULT_GITHUB_MODEL
+    # Step 2: Allowlist-validate against known model keys; never echo the raw value.
+    if raw not in _ALLOWLIST_GITHUB_MODEL_KEYS:
+        # SAFETY: do not include raw value in this message to prevent log exposure.
+        print(
+            "[warn] CODE_REVIEW_GITHUB_MODEL is not a recognised GitHub model key; "
+            f"falling back to {_DEFAULT_GITHUB_MODEL}",
+            file=sys.stderr,
+        )
+        return _DEFAULT_GITHUB_MODEL
+    return raw
+
+
 def _available_models() -> list[str]:
     """Return model keys for which credentials are configured.
 
-    GitHub Models (GITHUB_TOKEN) take priority — they provide three distinct
-    model architectures without needing separate provider API keys.
+    Uses a single GitHub model by default (github/gpt-4o or the value of
+    CODE_REVIEW_GITHUB_MODEL) to keep CI review latency predictable.
+    Additional models can be requested explicitly via --models on the CLI.
+    Credentials are validated at call-site inside each model function;
+    their values are never included in log output.
     """
     available = []
-    # GitHub Models — one token, three models for consensus
+    # GitHub Models — single model by default for consistent CI latency.
+    # Presence of GITHUB_TOKEN is checked here; its value is never logged.
     if os.environ.get("GITHUB_TOKEN"):
-        available.extend(["github/gpt-4o", "github/gpt-4o-mini", "github/llama"])
-    # Direct provider keys as fallback
+        available.append(_default_github_model())
+    # Direct provider keys as optional supplements.
     if os.environ.get("OPENAI_API_KEY"):
         available.append("openai")
     if os.environ.get("ANTHROPIC_API_KEY"):
