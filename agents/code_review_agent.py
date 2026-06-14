@@ -1145,17 +1145,42 @@ class CodeReviewAgent:
 # CLI
 # ---------------------------------------------------------------------------
 
+def _default_github_model() -> str:
+    """Return the single GitHub model used for CI reviews.
+
+    Override by setting CODE_REVIEW_GITHUB_MODEL in the environment.
+    Defaults to github/gpt-4o, which completes reliably within CI timeout
+    budgets.  github/gpt-4o-mini and github/llama are available via
+    ``--models`` on the CLI but are excluded from the default CI path
+    because they have exhibited inconsistent response latency under load,
+    causing the CI gate to stall indefinitely on large diffs.
+    """
+    model = os.environ.get("CODE_REVIEW_GITHUB_MODEL", "github/gpt-4o").strip()
+    # Validate the key is one we know how to call; fall back to gpt-4o if not.
+    if model not in _GITHUB_MODELS and model != "github/gpt-4o":
+        print(
+            f"[warn] CODE_REVIEW_GITHUB_MODEL={model!r} is not a recognised GitHub model key; "
+            "falling back to github/gpt-4o",
+            file=sys.stderr,
+        )
+        model = "github/gpt-4o"
+    return model
+
+
 def _available_models() -> list[str]:
     """Return model keys for which credentials are configured.
 
-    Uses github/gpt-4o as the single default CI model — reliable and fast.
+    Uses a single GitHub model by default (github/gpt-4o or the value of
+    CODE_REVIEW_GITHUB_MODEL) to keep CI review latency predictable.
     Additional models can be requested explicitly via --models on the CLI.
+    Credentials are validated at call-site inside each model function;
+    their values are never included in log output.
     """
     available = []
-    # GitHub Models — use gpt-4o only by default to avoid slow/unreliable models
+    # GitHub Models — single model by default for consistent CI latency.
     if os.environ.get("GITHUB_TOKEN"):
-        available.append("github/gpt-4o")
-    # Direct provider keys as fallback
+        available.append(_default_github_model())
+    # Direct provider keys as optional supplements.
     if os.environ.get("OPENAI_API_KEY"):
         available.append("openai")
     if os.environ.get("ANTHROPIC_API_KEY"):
