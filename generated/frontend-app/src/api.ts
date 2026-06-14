@@ -5,6 +5,7 @@ import type { Coachee, CoachingPlan, DiscussionItem, PlanAction, PlanStatus, Pla
 
 const BASE_URL = 'http://127.0.0.1:8000';
 const TOKEN_KEY = 'coaching_jwt';
+const USERNAME_KEY = 'coaching_username';
 
 export interface AuthTokens {
   access: string;
@@ -32,6 +33,36 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USERNAME_KEY);
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const decoded = atob(padded);
+    return JSON.parse(decoded) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export function setCurrentUsername(username: string): void {
+  localStorage.setItem(USERNAME_KEY, username);
+}
+
+export function getCurrentUsername(): string {
+  const stored = localStorage.getItem(USERNAME_KEY);
+  if (stored?.trim()) return stored;
+
+  const token = getToken();
+  if (!token) return 'Coach';
+
+  const payload = decodeJwtPayload(token);
+  const candidate = payload?.username ?? payload?.preferred_username ?? payload?.name ?? payload?.sub;
+  return typeof candidate === 'string' && candidate.trim() ? candidate : 'Coach';
 }
 
 export async function register(payload: RegisterPayload): Promise<{ id: number; username: string; email: string }> {
@@ -126,18 +157,25 @@ export async function updateTaskStatus(taskId: string, status: TaskStatus): Prom
 interface ApiMessage {
   id: number;
   title: string;
+  plan: number | null;
   task_id: number | null;
   author: string;
+  mentions: string;
   created_at: string;
 }
 
 function toDiscussionItem(message: ApiMessage): DiscussionItem {
   const text = message.title ?? '';
-  const mentions = Array.from(new Set((text.match(/@\w+/g) ?? []).map((token) => token.slice(1))));
+  const mentionsFromField = (message.mentions ?? '')
+    .split(',')
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const mentionsFromText = Array.from(new Set((text.match(/@\w+/g) ?? []).map((token) => token.slice(1))));
+  const mentions = mentionsFromField.length ? mentionsFromField : mentionsFromText;
   return {
     id: String(message.id),
     taskId: message.task_id ? String(message.task_id) : '',
-    planId: '',
+    planId: message.plan ? String(message.plan) : '',
     author: message.author,
     message: text,
     mentions,
@@ -145,18 +183,25 @@ function toDiscussionItem(message: ApiMessage): DiscussionItem {
   };
 }
 
-export async function listDiscussions(): Promise<DiscussionItem[]> {
-  const messages = await request<ApiMessage[]>('/api/messages/');
+export async function listDiscussions(filters?: { planId?: string; taskId?: string }): Promise<DiscussionItem[]> {
+  const params = new URLSearchParams();
+  if (filters?.planId) params.set('plan_id', filters.planId);
+  if (filters?.taskId) params.set('task_id', filters.taskId);
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const messages = await request<ApiMessage[]>(`/api/messages/${suffix}`);
   return messages.map(toDiscussionItem);
 }
 
-export async function createDiscussion(payload: { taskId: string; author: string; message: string }): Promise<DiscussionItem> {
+export async function createDiscussion(payload: { planId: string; taskId?: string; author: string; message: string }): Promise<DiscussionItem> {
+  const mentions = Array.from(new Set((payload.message.match(/@\w+/g) ?? []).map((token) => token.slice(1))));
   const created = await request<ApiMessage>('/api/messages/', {
     method: 'POST',
     body: JSON.stringify({
       title: payload.message,
+      plan: Number(payload.planId),
       task_id: payload.taskId ? Number(payload.taskId) : null,
       author: payload.author,
+      mentions: mentions.join(','),
     }),
   });
   return toDiscussionItem(created);
@@ -257,10 +302,17 @@ export async function createPlan(payload: {
   return toCoachingPlan(created);
 }
 
-export async function updatePlan(planId: string, patch: Partial<{ status: PlanStatus; targetDate: string }>): Promise<CoachingPlan> {
+export async function updatePlan(
+  planId: string,
+  patch: Partial<{ title: string; description: string; goal: string; status: PlanStatus; targetDate: string; coacheeId: string | null }>,
+): Promise<CoachingPlan> {
   const body: Record<string, unknown> = {};
+  if (patch.title !== undefined) body.title = patch.title;
+  if (patch.description !== undefined) body.description = patch.description;
+  if (patch.goal !== undefined) body.goal = patch.goal;
   if (patch.status !== undefined) body.status = toApiPlanStatus(patch.status);
   if (patch.targetDate !== undefined) body.target_date = patch.targetDate || null;
+  if (patch.coacheeId !== undefined) body.coachee = patch.coacheeId ? Number(patch.coacheeId) : null;
   const updated = await request<ApiPlan>(`/api/plans/${planId}/`, { method: 'PATCH', body: JSON.stringify(body) });
   return toCoachingPlan(updated);
 }
@@ -315,9 +367,24 @@ export async function createAction(
 }
 
 export async function updateActionStatus(planId: string, actionId: string, status: TaskStatus): Promise<PlanAction> {
+  return updateAction(planId, actionId, { status });
+}
+
+export async function updateAction(
+  planId: string,
+  actionId: string,
+  patch: Partial<{ title: string; description: string; assignee: string; dueDate: string; order: number; status: TaskStatus }>,
+): Promise<PlanAction> {
+  const body: Record<string, unknown> = {};
+  if (patch.title !== undefined) body.title = patch.title;
+  if (patch.description !== undefined) body.description = patch.description;
+  if (patch.assignee !== undefined) body.assignee = patch.assignee;
+  if (patch.dueDate !== undefined) body.due_date = patch.dueDate;
+  if (patch.order !== undefined) body.order = patch.order;
+  if (patch.status !== undefined) body.status = toApiStatus(patch.status);
   const updated = await request<ApiAction>(`/api/plans/${planId}/actions/${actionId}/`, {
     method: 'PATCH',
-    body: JSON.stringify({ status: toApiStatus(status) }),
+    body: JSON.stringify(body),
   });
   return toPlanAction(updated, planId);
 }
