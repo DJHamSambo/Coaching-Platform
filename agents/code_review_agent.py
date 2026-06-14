@@ -483,7 +483,7 @@ _GITHUB_MODELS: dict[str, str] = {
     "github/gpt-4o-mini": "gpt-4o-mini",
     "github/llama":       "Meta-Llama-3.1-405B-Instruct",
 }
-# Allowed CI model keys — used as a whitelist when validating CODE_REVIEW_GITHUB_MODEL.
+# Allowlist of valid CI model keys — derived dynamically from _GITHUB_MODELS to stay in sync.
 _ALLOWED_GITHUB_MODEL_KEYS: frozenset[str] = frozenset(_GITHUB_MODELS.keys())
 # Default model used for CI reviews.  Change via CODE_REVIEW_GITHUB_MODEL env var.
 _DEFAULT_GITHUB_MODEL = "github/gpt-4o"
@@ -1163,7 +1163,7 @@ def _default_github_model() -> str:
     latency is acceptable.
     """
     raw = os.environ.get("CODE_REVIEW_GITHUB_MODEL", _DEFAULT_GITHUB_MODEL).strip()
-    # Whitelist-validate against known model keys; never echo the raw value.
+    # Allowlist-validate against known model keys; never echo the raw value.
     if raw not in _ALLOWED_GITHUB_MODEL_KEYS:
         print(
             "[warn] CODE_REVIEW_GITHUB_MODEL is not a recognised GitHub model key; "

@@ -544,6 +544,25 @@ class TestGitHubModelsBackend:
         monkeypatch.setenv("CODE_REVIEW_GITHUB_MODEL", "   ")
         assert _default_github_model() == _DEFAULT_GITHUB_MODEL
 
+    def test_default_github_model_special_chars_fall_back(self, monkeypatch):
+        from agents.code_review_agent import _DEFAULT_GITHUB_MODEL, _default_github_model
+        monkeypatch.setenv("CODE_REVIEW_GITHUB_MODEL", "github/gpt-4o; rm -rf /")
+        assert _default_github_model() == _DEFAULT_GITHUB_MODEL
+
+    def test_default_github_model_very_long_value_falls_back(self, monkeypatch):
+        from agents.code_review_agent import _DEFAULT_GITHUB_MODEL, _default_github_model
+        monkeypatch.setenv("CODE_REVIEW_GITHUB_MODEL", "x" * 500)
+        assert _default_github_model() == _DEFAULT_GITHUB_MODEL
+
+    def test_default_github_model_warning_never_echoes_value(self, monkeypatch, capsys):
+        from agents.code_review_agent import _default_github_model
+        secret_value = "definitely-not-a-model-ghp_secret123"
+        monkeypatch.setenv("CODE_REVIEW_GITHUB_MODEL", secret_value)
+        _default_github_model()
+        captured = capsys.readouterr()
+        assert secret_value not in captured.err
+        assert secret_value not in captured.out
+
     def test_github_models_not_detected_without_token(self, monkeypatch):
         from agents.code_review_agent import _available_models
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
