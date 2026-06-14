@@ -6,8 +6,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from .backend_developer_agent import BackendBuildResult, BackendDeveloperAgent, ParsedRequirements
-from .frontend_developer_agent import BuildResult, FrontendDeveloperAgent, ParsedRequirements as FrontendParsedRequirements
+try:
+    from .backend_developer_agent import BackendBuildResult, BackendDeveloperAgent, ParsedRequirements
+    from .frontend_developer_agent import BuildResult, FrontendDeveloperAgent, ParsedRequirements as FrontendParsedRequirements
+except ImportError:
+    from backend_developer_agent import BackendBuildResult, BackendDeveloperAgent, ParsedRequirements
+    from frontend_developer_agent import BuildResult, FrontendDeveloperAgent, ParsedRequirements as FrontendParsedRequirements
 
 
 @dataclass(frozen=True)
@@ -29,11 +33,9 @@ class DeveloperBuildResult:
 
 
 class DeveloperAgent:
-    """Single end-to-end developer agent that generates backend and frontend
-    implementations from one requirements document.
-    """
+    """Single end-to-end developer agent that generates backend and frontend implementations from one requirements document."""
 
-    VERSION = "1.0.0"
+    VERSION = "1.2.0"
     REPORT_FILENAME = "developer-agent-report.md"
 
     def __init__(self) -> None:
@@ -51,17 +53,21 @@ class DeveloperAgent:
         base_url: str = "http://localhost:8000",
         backend_dir_name: str = "backend-app",
         frontend_dir_name: str = "frontend-app",
+        backend_project_name: str | None = None,
+        frontend_project_name: str | None = None,
     ) -> DeveloperBuildResult:
         root = Path(output_dir)
         root.mkdir(parents=True, exist_ok=True)
 
         backend_dir = root / backend_dir_name
         frontend_dir = root / frontend_dir_name
+        backend_name = backend_project_name or f"{project_name}-backend"
+        frontend_name = frontend_project_name or f"{project_name}-frontend"
 
         backend_result = self.backend_agent.build_from_requirements(
             requirements=requirements,
             output_dir=backend_dir,
-            project_name=f"{project_name}-backend",
+            project_name=backend_name,
             base_url=base_url,
         )
 
@@ -76,7 +82,7 @@ class DeveloperAgent:
         frontend_result = self.frontend_agent.build_from_requirements(
             requirements=frontend_requirements,
             output_dir=frontend_dir,
-            project_name=f"{project_name}-frontend",
+            project_name=frontend_name,
         )
 
         generated_files = list(backend_result.generated_files) + list(frontend_result.generated_files)
@@ -116,14 +122,16 @@ class DeveloperAgent:
                 "- Builds backend implementation and integration contract",
                 "- Builds frontend implementation scaffold",
                 "- Writes a unified run report",
+                "- Applies persistence-ready backend/frontend scaffold alignment for tasks and discussions",
                 "",
                 "## Usage",
                 "",
                 "```bash",
                 "python agents/developer_agent.py \\",
                 "  --requirements-file docs/coaching-platform-requirements.md \\",
-                "  --output generated/full-stack-app \\",
-                "  --project-name coaching-platform",
+                "  --output generated \\",
+                "  --backend-dir-name backend-app \\",
+                "  --frontend-dir-name frontend-app",
                 "```",
                 "",
                 "## Options",
@@ -131,10 +139,12 @@ class DeveloperAgent:
                 "| Flag | Default | Description |",
                 "|---|---|---|",
                 "| `--requirements-file` | required | Path to the requirements markdown file |",
-                "| `--output` | `generated/full-stack-app` | Output directory for all generated artifacts |",
-                "| `--project-name` | `coaching-platform` | Project name prefix used by backend/frontend outputs |",
+                "| `--output` | `generated` | Output root for generated artifacts |",
+                "| `--project-name` | `coaching` | Legacy prefix used when backend/frontend project names are not provided |",
                 "| `--backend-dir-name` | `backend-app` | Subdirectory name for backend output |",
                 "| `--frontend-dir-name` | `frontend-app` | Subdirectory name for frontend output |",
+                "| `--backend-project-name` | `coaching-backend` | Backend project name used in generated configs |",
+                "| `--frontend-project-name` | `coaching-frontend` | Frontend package/project name |",
                 "| `--base-url` | `http://localhost:8000` | Backend base URL written to integration contract |",
                 "| `--update-docs` | flag | Regenerate docs/developer-agent.md |",
                 "",
@@ -142,6 +152,8 @@ class DeveloperAgent:
                 "",
                 "- Uses Python standard library only.",
                 "- Delegates backend and frontend generation to the existing implementation modules.",
+                "- By default it updates `generated/backend-app` and `generated/frontend-app` in place.",
+                "- Emits aligned scaffolds so planning board actions and discussions can be persisted end to end.",
                 f"- Agent version: {self.VERSION}",
                 "",
             ]
@@ -183,8 +195,12 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Generate backend and frontend implementations from a requirements markdown file."
     )
     parser.add_argument("--requirements-file", required=True, help="Path to requirements markdown.")
-    parser.add_argument("--output", default="generated/full-stack-app", help="Output directory for generated project.")
-    parser.add_argument("--project-name", default="coaching-platform", help="Project name prefix used in generated outputs.")
+    parser.add_argument("--output", default="generated", help="Output root for generated project folders.")
+    parser.add_argument(
+        "--project-name",
+        default="coaching",
+        help="Legacy project prefix used when project-name overrides are not provided.",
+    )
     parser.add_argument(
         "--backend-dir-name",
         default="backend-app",
@@ -194,6 +210,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--frontend-dir-name",
         default="frontend-app",
         help="Subdirectory created inside --output for frontend implementation.",
+    )
+    parser.add_argument(
+        "--backend-project-name",
+        default="coaching-backend",
+        help="Backend project name used by backend generator.",
+    )
+    parser.add_argument(
+        "--frontend-project-name",
+        default="coaching-frontend",
+        help="Frontend project/package name used by frontend generator.",
     )
     parser.add_argument("--base-url", default="http://localhost:8000", help="Backend base URL for integration contract.")
     parser.add_argument("--update-docs", action="store_true", help="Regenerate docs/developer-agent.md.")
@@ -213,6 +239,8 @@ def main() -> int:
         base_url=args.base_url,
         backend_dir_name=args.backend_dir_name,
         frontend_dir_name=args.frontend_dir_name,
+        backend_project_name=args.backend_project_name,
+        frontend_project_name=args.frontend_project_name,
     )
 
     if args.update_docs:

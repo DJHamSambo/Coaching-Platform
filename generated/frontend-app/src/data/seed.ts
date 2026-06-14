@@ -1,6 +1,6 @@
 import type { DiscussionItem, InsightItem, PlanTask, ResourceItem, SessionItem } from '../types';
 
-export const requirementTitle = 'Coaching Platform Requirements';
+export const requirementTitle = 'Development Requirements';
 
 export const initialTasks: PlanTask[] = [
   { id: 'task-1', title: 'Define coaching goal and milestones', description: 'Break goal into sequenced actions.', status: 'backlog', assignee: 'Coachee', dueDate: '2026-07-01' },

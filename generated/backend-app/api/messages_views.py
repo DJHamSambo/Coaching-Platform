@@ -1,21 +1,32 @@
 from rest_framework import generics, permissions
+from django.contrib.auth.models import User
 from api.messages_serializers import MessagesSerializer
+
+
+def _resolve_owner(request) -> User:
+    user = request.user
+    if user and getattr(user, "is_authenticated", False):
+        return user
+    owner, _ = User.objects.get_or_create(username="demo_coach", defaults={"email": "demo@example.com"})
+    return owner
 
 
 class MessagesListView(generics.ListCreateAPIView):
     serializer_class = MessagesSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        return self.serializer_class.Meta.model.objects.filter(owner=self.request.user)
+        owner = _resolve_owner(self.request)
+        return self.serializer_class.Meta.model.objects.filter(owner=owner).order_by("-created_at")
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        serializer.save(owner=_resolve_owner(self.request))
 
 
 class MessagesDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = MessagesSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get_queryset(self):
-        return self.serializer_class.Meta.model.objects.filter(owner=self.request.user)
+        owner = _resolve_owner(self.request)
+        return self.serializer_class.Meta.model.objects.filter(owner=owner)

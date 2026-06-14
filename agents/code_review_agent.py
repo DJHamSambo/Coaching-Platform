@@ -59,6 +59,7 @@ Environment variables
 
 import argparse
 import datetime as dt
+import fnmatch
 import json
 import os
 import re
@@ -300,8 +301,9 @@ def _http_post(url: str, headers: dict[str, str], payload: dict) -> str:
     """Send a JSON POST and return the response body as str."""
     data = json.dumps(payload).encode("utf-8")
     req  = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    timeout_seconds = _http_timeout_seconds()
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
             return resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
@@ -485,6 +487,49 @@ _GITHUB_MODELS: dict[str, str] = {
 _GITHUB_ENDPOINT_DEFAULT = "https://models.inference.ai.azure.com/chat/completions"
 # Max output tokens per request.  Override via GITHUB_MODELS_MAX_TOKENS env var.
 _GITHUB_MAX_TOKENS_DEFAULT = 2048
+_HTTP_TIMEOUT_SECONDS_DEFAULT = 60
+_MAX_REVIEWABLE_FILES_DEFAULT = 30
+
+
+def _http_timeout_seconds() -> int:
+    """Return request timeout for AI HTTP calls."""
+    try:
+        return max(5, int(os.environ.get("CODE_REVIEW_HTTP_TIMEOUT_SECONDS", str(_HTTP_TIMEOUT_SECONDS_DEFAULT))))
+    except (TypeError, ValueError):
+        return _HTTP_TIMEOUT_SECONDS_DEFAULT
+
+
+def _max_reviewable_files() -> int:
+    """Return maximum number of files to send to model reviews."""
+    try:
+        return max(1, int(os.environ.get("CODE_REVIEW_MAX_FILES", str(_MAX_REVIEWABLE_FILES_DEFAULT))))
+    except (TypeError, ValueError):
+        return _MAX_REVIEWABLE_FILES_DEFAULT
+
+
+def _excluded_review_globs() -> list[str]:
+    """Return glob patterns for files intentionally excluded from AI review."""
+    defaults = [
+        "generated/frontend-app/dist/**",
+        "**/node_modules/**",
+        "**/.venv/**",
+        "**/__pycache__/**",
+        "**/*.min.js",
+        "**/*.map",
+    ]
+    extra = os.environ.get("CODE_REVIEW_EXCLUDE_GLOBS", "").strip()
+    if not extra:
+        return defaults
+    parsed = [item.strip() for item in extra.split(",") if item.strip()]
+    return defaults + parsed
+
+
+def _is_excluded_path(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    for pattern in _excluded_review_globs():
+        if fnmatch.fnmatch(normalized, pattern):
+            return True
+    return False
 
 
 def _github_models_endpoint() -> str:
@@ -836,8 +881,24 @@ class CodeReviewAgent:
         print(f"[info] code-review-agent v{self.VERSION} | {timestamp}", file=sys.stderr)
 
         diff_files   = self.get_diff(repo_path, commit, base, diff_file)
-        reviewable   = [d for d in diff_files if not d.is_deleted and d.content_snippet]
+        eligible = [
+            d for d in diff_files
+            if not d.is_deleted and d.content_snippet and not _is_excluded_path(d.path)
+        ]
+        excluded_count = len(diff_files) - len(eligible)
+        max_files = _max_reviewable_files()
+        reviewable = eligible[:max_files]
+        truncated_count = max(0, len(eligible) - len(reviewable))
+
         print(f"[info] {len(reviewable)} files to review", file=sys.stderr)
+        if excluded_count:
+            print(f"[info] excluded {excluded_count} file(s) by path filters", file=sys.stderr)
+        if truncated_count:
+            print(
+                f"[warn] review scope truncated to {max_files} file(s); "
+                f"{truncated_count} additional file(s) skipped",
+                file=sys.stderr,
+            )
 
         if not reviewable:
             print("[warn] no reviewable content in diff", file=sys.stderr)

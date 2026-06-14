@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -29,6 +30,8 @@ from agents.code_review_agent import (  # noqa: E402
 
 _logger = logging.getLogger(__name__)
 logging.basicConfig(format="[%(levelname)s] %(message)s", level=logging.INFO)
+
+_CI_TIMEOUT_SECONDS_DEFAULT = 300
 
 # ---------------------------------------------------------------------------
 # CI gate types
@@ -329,9 +332,15 @@ class GitFlowAgent:
                 "--requirements-file",
                 str(requirements_file),
                 "--output",
-                "generated/full-stack-app",
-                "--project-name",
-                "coaching-platform",
+                "generated",
+                "--backend-dir-name",
+                "backend-app",
+                "--frontend-dir-name",
+                "frontend-app",
+                "--backend-project-name",
+                "coaching-backend",
+                "--frontend-project-name",
+                "coaching-frontend",
                 "--base-url",
                 "http://localhost:8000",
             ],
@@ -530,14 +539,71 @@ class GitFlowAgent:
 
         _logger.info("Running code review: %s → %s", feature_branch, base_branch)
         agent = _CodeReviewAgent()
-        result: _ReviewResult = agent.review(
-            repo_path=self.repo_path,
-            commit=feature_branch,
-            base=base_branch,
-            models=models,
-            write_report=True,
-            patch_agents=True,
-        )
+        timeout_seconds = self._ci_timeout_seconds()
+
+        result_box: dict[str, object] = {}
+
+        def _run_review() -> None:
+            try:
+                result_box["result"] = agent.review(
+                    repo_path=self.repo_path,
+                    commit=feature_branch,
+                    base=base_branch,
+                    models=models,
+                    write_report=True,
+                    patch_agents=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                result_box["error"] = exc
+
+        review_thread = threading.Thread(target=_run_review, daemon=True)
+        review_thread.start()
+        review_thread.join(timeout=timeout_seconds)
+
+        if review_thread.is_alive():
+            _logger.error(
+                "Code review timed out after %s seconds. "
+                "Set GITFLOW_CI_TIMEOUT_SECONDS to tune this limit.",
+                timeout_seconds,
+            )
+            return CIResult(
+                passed=False,
+                score=0.0,
+                models_used=models,
+                critical=1,
+                high=0,
+                medium=0,
+                low=0,
+                fix_instructions_path=None,
+            )
+
+        if "error" in result_box:
+            err = result_box["error"]
+            _logger.error("Code review execution error: %s", err)
+            return CIResult(
+                passed=False,
+                score=0.0,
+                models_used=models,
+                critical=1,
+                high=0,
+                medium=0,
+                low=0,
+                fix_instructions_path=None,
+            )
+
+        result = result_box.get("result")
+        if not isinstance(result, _ReviewResult):
+            _logger.error("Code review produced no result.")
+            return CIResult(
+                passed=False,
+                score=0.0,
+                models_used=models,
+                critical=1,
+                high=0,
+                medium=0,
+                low=0,
+                fix_instructions_path=None,
+            )
 
         by_sev = result.findings_by_severity()
         critical = len(by_sev[_Severity.CRITICAL])
@@ -575,6 +641,13 @@ class GitFlowAgent:
             low=low,
             fix_instructions_path=fix_path,
         )
+
+    @staticmethod
+    def _ci_timeout_seconds() -> int:
+        try:
+            return max(30, int(os.environ.get("GITFLOW_CI_TIMEOUT_SECONDS", str(_CI_TIMEOUT_SECONDS_DEFAULT))))
+        except (TypeError, ValueError):
+            return _CI_TIMEOUT_SECONDS_DEFAULT
 
     def _write_fix_instructions(
         self,

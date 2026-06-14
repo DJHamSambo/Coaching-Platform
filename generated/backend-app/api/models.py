@@ -19,8 +19,14 @@ class Task(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    def __str__(self) -> str:
-        return self.title
+
+class Message(models.Model):
+    title = models.CharField(max_length=500, help_text="The discussion message text")
+    task_id = models.IntegerField(null=True, blank=True)
+    author = models.CharField(max_length=100, default="Coach")
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="messages")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class Session(models.Model):
@@ -33,20 +39,6 @@ class Session(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    def __str__(self) -> str:
-        return self.title
-
-
-class Message(models.Model):
-    title = models.CharField(max_length=500, help_text="The discussion message text")
-    author = models.CharField(max_length=100, default="Coach")
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="messages")
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self) -> str:
-        return self.title[:80]
-
 
 class Insight(models.Model):
     title = models.CharField(max_length=1000, help_text="The insight/journal note text")
@@ -54,9 +46,6 @@ class Insight(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="insights")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self) -> str:
-        return self.title[:80]
 
 
 class Resource(models.Model):
@@ -74,6 +63,3 @@ class Resource(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="resources")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self) -> str:
-        return self.title

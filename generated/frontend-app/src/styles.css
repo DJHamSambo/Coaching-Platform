@@ -47,7 +47,6 @@ body {
   padding: 0.45rem 0.9rem;
   cursor: pointer;
   font-size: 0.92rem;
-  transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
 }
 .tab.active {
   border-color: var(--accent);
@@ -89,7 +88,6 @@ input, select, textarea {
   border-radius: 8px;
   padding: 0.5rem 0.6rem;
   font: inherit;
-  transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
 button.primary {
@@ -100,27 +98,6 @@ button.primary {
   border-radius: 8px;
   padding: 0.5rem 0.8rem;
   cursor: pointer;
-  transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
-}
-
-.tab:focus-visible,
-button.primary:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--accent) 80%, white 20%);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation: none !important;
-    transition: none !important;
-    scroll-behavior: auto !important;
-  }
 }
 
 .list { margin: 0.8rem 0 0; padding-left: 1.15rem; }

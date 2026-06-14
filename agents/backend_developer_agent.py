@@ -267,7 +267,7 @@ class BackendDeveloperAgent:
         return IntegrationContract(
             api_style="rest",
             base_url=base_url,
-            cors_origins=["http://localhost:5173", "http://localhost:4173"],
+            cors_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:4173"],
             auth_header="Authorization: Bearer <token>",
             openapi_path="/docs",
             endpoints=endpoints,
@@ -322,7 +322,7 @@ class BackendDeveloperAgent:
             "Use the unified end-to-end Developer Agent instead:",
             "",
             "- Primary docs: `docs/developer-agent.md`",
-            "- Primary CLI: `python agents/developer_agent.py --requirements-file docs/coaching-platform-requirements.md --output generated/full-stack-app --project-name coaching-platform`",
+            "- Primary CLI: `python agents/developer_agent.py --requirements-file docs/coaching-platform-requirements.md --output generated --backend-dir-name backend-app --frontend-dir-name frontend-app`",
             "",
             "The backend developer agent implementation remains available as an internal building block used by the unified Developer Agent.",
             "",
@@ -741,6 +741,9 @@ def test_health() -> None:
         files.append(self._write(root / safe_name / "urls.py", self._django_urls(modules)))
         files.append(self._write(root / safe_name / "wsgi.py", self._django_wsgi(safe_name)))
         files.append(self._write(root / "api" / "__init__.py", ""))
+        files.append(self._write(root / "api" / "models.py", self._django_models()))
+        files.append(self._write(root / "api" / "migrations" / "__init__.py", ""))
+        files.append(self._write(root / "api" / "migrations" / "0001_initial.py", self._django_initial_migration()))
         files.append(self._write(root / "api" / "permissions.py", self._django_permissions()))
         for module, enabled in modules.items():
             if enabled:
@@ -748,9 +751,161 @@ def test_health() -> None:
                 files.append(self._write(root / "api" / f"{module}_serializers.py", self._django_serializer(module)))
         return files
 
+    def _django_models(self) -> str:
+        return '''\
+from __future__ import annotations
+
+from django.contrib.auth.models import User
+from django.db import models
+
+
+class Task(models.Model):
+    STATUS_CHOICES = [
+        ("backlog", "Backlog"),
+        ("in_progress", "In Progress"),
+        ("done", "Done"),
+    ]
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="backlog")
+    assignee = models.CharField(max_length=100, default="Coachee")
+    due_date = models.DateField(null=True, blank=True)
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="tasks")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class Message(models.Model):
+    title = models.CharField(max_length=500, help_text="The discussion message text")
+    task_id = models.IntegerField(null=True, blank=True)
+    author = models.CharField(max_length=100, default="Coach")
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="messages")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class Session(models.Model):
+    MODE_CHOICES = [("video", "Video"), ("in-person", "In Person"), ("phone", "Phone")]
+    title = models.CharField(max_length=255)
+    date = models.DateTimeField(null=True, blank=True)
+    mode = models.CharField(max_length=20, choices=MODE_CHOICES, default="video")
+    requested_by = models.CharField(max_length=100, default="coachee")
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sessions")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class Insight(models.Model):
+    title = models.CharField(max_length=1000, help_text="The insight/journal note text")
+    author = models.CharField(max_length=100, default="Coach")
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="insights")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class Resource(models.Model):
+    CATEGORY_CHOICES = [
+        ("guide", "Guide"),
+        ("tool", "Tool"),
+        ("template", "Template"),
+        ("article", "Article"),
+    ]
+    SCOPE_CHOICES = [("shared", "Shared"), ("private", "Private")]
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default="guide")
+    scope = models.CharField(max_length=20, choices=SCOPE_CHOICES, default="shared")
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="resources")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+'''
+
+    def _django_initial_migration(self) -> str:
+        return '''\
+# Generated by BackendDeveloperAgent
+
+import django.db.models.deletion
+from django.conf import settings
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+    initial = True
+
+    dependencies = [
+        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name='Insight',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('title', models.CharField(help_text='The insight/journal note text', max_length=1000)),
+                ('author', models.CharField(default='Coach', max_length=100)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('owner', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='insights', to=settings.AUTH_USER_MODEL)),
+            ],
+        ),
+        migrations.CreateModel(
+            name='Message',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('title', models.CharField(help_text='The discussion message text', max_length=500)),
+                ('task_id', models.IntegerField(blank=True, null=True)),
+                ('author', models.CharField(default='Coach', max_length=100)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('owner', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='messages', to=settings.AUTH_USER_MODEL)),
+            ],
+        ),
+        migrations.CreateModel(
+            name='Resource',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('title', models.CharField(max_length=255)),
+                ('description', models.TextField(blank=True, default='')),
+                ('category', models.CharField(choices=[('guide', 'Guide'), ('tool', 'Tool'), ('template', 'Template'), ('article', 'Article')], default='guide', max_length=50)),
+                ('scope', models.CharField(choices=[('shared', 'Shared'), ('private', 'Private')], default='shared', max_length=20)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('owner', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='resources', to=settings.AUTH_USER_MODEL)),
+            ],
+        ),
+        migrations.CreateModel(
+            name='Session',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('title', models.CharField(max_length=255)),
+                ('date', models.DateTimeField(blank=True, null=True)),
+                ('mode', models.CharField(choices=[('video', 'Video'), ('in-person', 'In Person'), ('phone', 'Phone')], default='video', max_length=20)),
+                ('requested_by', models.CharField(default='coachee', max_length=100)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('owner', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='sessions', to=settings.AUTH_USER_MODEL)),
+            ],
+        ),
+        migrations.CreateModel(
+            name='Task',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('title', models.CharField(max_length=255)),
+                ('description', models.TextField(blank=True, default='')),
+                ('status', models.CharField(choices=[('backlog', 'Backlog'), ('in_progress', 'In Progress'), ('done', 'Done')], default='backlog', max_length=20)),
+                ('assignee', models.CharField(default='Coachee', max_length=100)),
+                ('due_date', models.DateField(blank=True, null=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('updated_at', models.DateTimeField(auto_now=True)),
+                ('owner', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='tasks', to=settings.AUTH_USER_MODEL)),
+            ],
+        ),
+    ]
+'''
+
     def _django_requirements(self) -> str:
         return (
-            "django>=5.0\ndjangrestframework>=3.15\ndjango-cors-headers>=4.3\n"
+            "django>=5.0\ndjangorestframework>=3.15\ndjango-cors-headers>=4.3\n"
             "djangorestframework-simplejwt>=5.3\npsycopg2-binary>=2.9\n"
             "python-decouple>=3.8\npytest-django>=4.8\n"
         )
@@ -866,6 +1021,41 @@ class IsOwner(BasePermission):
 
     def _django_view(self, module: str) -> str:
         class_name = module.capitalize()
+        if module in {"tasks", "messages"}:
+            return f'''\
+from rest_framework import generics, permissions
+from django.contrib.auth.models import User
+from api.{module}_serializers import {class_name}Serializer
+
+
+def _resolve_owner(request) -> User:
+    user = request.user
+    if user and getattr(user, "is_authenticated", False):
+        return user
+    owner, _ = User.objects.get_or_create(username="demo_coach", defaults={{"email": "demo@example.com"}})
+    return owner
+
+
+class {class_name}ListView(generics.ListCreateAPIView):
+    serializer_class = {class_name}Serializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        owner = _resolve_owner(self.request)
+        return self.serializer_class.Meta.model.objects.filter(owner=owner).order_by("-created_at")
+
+    def perform_create(self, serializer):
+        serializer.save(owner=_resolve_owner(self.request))
+
+
+class {class_name}DetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = {class_name}Serializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        owner = _resolve_owner(self.request)
+        return self.serializer_class.Meta.model.objects.filter(owner=owner)
+'''
         return f'''\
 from rest_framework import generics, permissions
 from api.{module}_serializers import {class_name}Serializer
@@ -892,6 +1082,30 @@ class {class_name}DetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def _django_serializer(self, module: str) -> str:
         class_name = module.capitalize()
+        if module == "tasks":
+            return '''\
+from rest_framework import serializers
+from api.models import Task
+
+
+class TasksSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Task
+        fields = "__all__"
+        read_only_fields = ("id", "owner", "created_at", "updated_at")
+'''
+        if module == "messages":
+            return '''\
+from rest_framework import serializers
+from api.models import Message
+
+
+class MessagesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Message
+        fields = "__all__"
+        read_only_fields = ("id", "owner", "created_at", "updated_at")
+'''
         return f'''\
 from rest_framework import serializers
 

@@ -249,6 +249,12 @@ class RequirementsAgent:
     def _extract_actor(self, segment: str, current_actor: str | None) -> tuple[str | None, str]:
         cleaned = segment.strip()
         actor = current_actor
+
+        role_story_match = re.match(r"^as\s+an?\s+(coach|coachee)\b[\s,:-]*", cleaned, flags=re.IGNORECASE)
+        if role_story_match:
+            actor = role_story_match.group(1).lower()
+            cleaned = cleaned[role_story_match.end() :].strip(" ,:-")
+
         for prefix in self.ROLE_PREFIXES:
             if cleaned.lower().startswith(f"{prefix} "):
                 actor = prefix
@@ -286,10 +292,17 @@ class RequirementsAgent:
     def _build_user_story(self, statement: dict[str, str | None]) -> str:
         actor = str(statement["actor"] or "user")
         capability, benefit = self._normalise_capability(str(statement["text"]), statement["actor"])
+        capability = self._story_capability(capability)
         if capability.lower().startswith("coaches "):
             story = f"As a {self.ROLE_LABELS.get(actor, actor)}, I want coaches to {capability[8:]}"
         elif capability.lower().startswith("coachees "):
             story = f"As a {self.ROLE_LABELS.get(actor, actor)}, I want coachees to {capability[9:]}"
+        elif capability.lower().startswith("coaching plans to "):
+            story = f"As a {self.ROLE_LABELS.get(actor, actor)}, I want {capability}"
+        elif capability.lower().startswith("each coaching plan to "):
+            story = f"As a {self.ROLE_LABELS.get(actor, actor)}, I want {capability}"
+        elif capability.lower().startswith("each action to "):
+            story = f"As a {self.ROLE_LABELS.get(actor, actor)}, I want {capability}"
         else:
             story = f"As a {self.ROLE_LABELS.get(actor, actor)}, I want to {capability}"
         if benefit:
@@ -300,6 +313,8 @@ class RequirementsAgent:
         actor = statement["actor"]
         capability, benefit = self._normalise_capability(str(statement["text"]), actor)
         target_actor = self._infer_target_actor(capability, actor)
+        if capability.lower().startswith(("allow ", "show ", "visualise ", "support ", "provide ")):
+            target_actor = self._infer_target_actor(capability, None)
         verb_phrase = self._strip_actor_target_prefix(capability)
         if target_actor:
             requirement = f"The system shall allow {self.ROLE_PLURALS[target_actor]} to {verb_phrase}"
@@ -311,6 +326,8 @@ class RequirementsAgent:
 
     def _normalise_capability(self, sentence: str, actor: str | None) -> tuple[str, str | None]:
         cleaned = re.sub(r"\s+", " ", sentence.strip(" ."))
+        cleaned = self._strip_story_prefix(cleaned)
+        cleaned = self._normalise_leading_requirement_phrase(cleaned)
         cleaned = re.sub(r"\b(can together from all plans)\b", "capture together from all plans", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(
             r"^build a [^.]+? that must ",
@@ -353,6 +370,56 @@ class RequirementsAgent:
         capability = capability[0].lower() + capability[1:] if capability else capability
         return capability.rstrip("."), benefit.rstrip(".") if benefit else None
 
+    def _strip_story_prefix(self, sentence: str) -> str:
+        cleaned = sentence.strip()
+        patterns = (
+            r"^as\s+an?\s+(?:coach|coachee)\s*,?\s*i\s+want\s+to\s+be\s+able\s+to\s+",
+            r"^as\s+an?\s+(?:coach|coachee)\s*,?\s*i\s+want\s+the\s+ability\s+to\s+",
+            r"^as\s+an?\s+(?:coach|coachee)\s*,?\s*i\s+want\s+to\s+",
+            r"^as\s+an?\s+(?:coach|coachee)\s*,?\s*i\s+want\s+",
+            r"^i\s+want\s+to\s+be\s+able\s+to\s+",
+        )
+        for pattern in patterns:
+            updated = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+            if updated != cleaned:
+                return updated.strip()
+        return cleaned
+
+    def _normalise_leading_requirement_phrase(self, sentence: str) -> str:
+        cleaned = sentence.strip()
+        lowered = cleaned.lower()
+
+        if lowered.startswith("these should show as a list in "):
+            remainder = cleaned[len("these should show as a list in ") :].strip()
+            return f"show coaching plans as a list in {remainder}"
+        if lowered.startswith("each coaching plan should be able to have "):
+            remainder = cleaned[len("each coaching plan should be able to have ") :].strip()
+            return f"allow each coaching plan to have {remainder}"
+        if lowered.startswith("each coaching plan should have "):
+            remainder = cleaned[len("each coaching plan should have ") :].strip()
+            return f"allow each coaching plan to have {remainder}"
+        if lowered.startswith("each of the actions should be able to have "):
+            remainder = cleaned[len("each of the actions should be able to have ") :].strip()
+            return f"allow each action to have {remainder}"
+        if lowered.startswith("each action should be able to have "):
+            remainder = cleaned[len("each action should be able to have ") :].strip()
+            return f"allow each action to have {remainder}"
+        if "coaching plan's should also be able to have discussion" in lowered or "coaching plans should also be able to have discussion" in lowered:
+            return "allow coaching plans to include discussion threads"
+        return cleaned
+
+    def _story_capability(self, capability: str) -> str:
+        lowered = capability.lower()
+        if lowered.startswith("allow each coaching plan to "):
+            return re.sub(r"\s+", " ", f"each coaching plan to {capability[28:]}").strip()
+        if lowered.startswith("allow each action to "):
+            return re.sub(r"\s+", " ", f"each action to {capability[21:]}").strip()
+        if lowered.startswith("show coaching plans as a list in "):
+            return re.sub(r"\s+", " ", f"coaching plans to be shown as a list in {capability[33:]}").strip()
+        if lowered.startswith("allow coaching plans to "):
+            return re.sub(r"\s+", " ", f"coaching plans to {capability[24:]}").strip()
+        return capability
+
     def _normalise_phrase(self, phrase: str, actor: str | None) -> str:
         cleaned = phrase.strip(" .")
         cleaned = re.sub(r"\bnormal calendaring apps of choice\b", "preferred calendaring apps", cleaned, flags=re.IGNORECASE)
@@ -388,6 +455,11 @@ class RequirementsAgent:
             return (
                 "manage a coaching plan with an overall goal, sequenced actions, a kanban-style board, and a target date",
                 "progress remains visible over time",
+            )
+        if "in progress coaching plans" in lowered and "drag and drop" in lowered and "kanban" in lowered:
+            return (
+                "visualise actions from in-progress coaching plans on a kanban board and drag actions between status columns",
+                "action status updates stay synchronized with board movement",
             )
         if "comments/discussion against an action/task" in lowered:
             return (
