@@ -9,11 +9,36 @@ import {
   updateAdminCoachee,
   updateAdminCoach,
 } from '../api';
+import { isValidInputEmail, sanitizeInput, sanitizeInputEmail } from './adminFormUtils';
 import type { AdminCoachee, AdminCoach, CurrentUser } from '../types';
 
 interface AdministrationPanelProps {
   currentUser: CurrentUser;
 }
+
+interface CoachFormState {
+  username: string;
+  email: string;
+  isAdmin: boolean;
+}
+
+interface CoacheeFormState {
+  name: string;
+  email: string;
+  notes: string;
+}
+
+const EMPTY_COACH_FORM: CoachFormState = {
+  username: '',
+  email: '',
+  isAdmin: false,
+};
+
+const EMPTY_COACHEE_FORM: CoacheeFormState = {
+  name: '',
+  email: '',
+  notes: '',
+};
 
 export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
   const [coaches, setCoaches] = useState<AdminCoach[]>([]);
@@ -21,14 +46,13 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [newCoachUsername, setNewCoachUsername] = useState('');
-  const [newCoachEmail, setNewCoachEmail] = useState('');
-  const [newCoachPassword, setNewCoachPassword] = useState('');
-  const [newCoachAdmin, setNewCoachAdmin] = useState(false);
+  const [addingCoach, setAddingCoach] = useState(false);
+  const [addingCoachee, setAddingCoachee] = useState(false);
+  const [coachForm, setCoachForm] = useState<CoachFormState>(EMPTY_COACH_FORM);
+  const [coacheeForm, setCoacheeForm] = useState<CoacheeFormState>(EMPTY_COACHEE_FORM);
 
-  const [newCoacheeName, setNewCoacheeName] = useState('');
-  const [newCoacheeEmail, setNewCoacheeEmail] = useState('');
-  const [newCoacheeNotes, setNewCoacheeNotes] = useState('');
+  const [editingCoach, setEditingCoach] = useState<AdminCoach | null>(null);
+  const [editingCoachee, setEditingCoachee] = useState<AdminCoachee | null>(null);
 
   async function loadData() {
     setLoading(true);
@@ -53,30 +77,51 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
 
   async function handleCreateCoach(event: React.FormEvent) {
     event.preventDefault();
-    if (!newCoachUsername.trim()) return;
+    const username = sanitizeInput(coachForm.username, 150);
+    const email = sanitizeInputEmail(coachForm.email);
+
+    if (!username) {
+      setError('Coach username is required.');
+      return;
+    }
+    if (!isValidInputEmail(email)) {
+      setError('Please enter a valid coach email.');
+      return;
+    }
+
     try {
       const created = await createAdminCoach({
-        username: newCoachUsername.trim(),
-        email: newCoachEmail.trim(),
-        password: newCoachPassword.trim() || undefined,
-        isAdmin: newCoachAdmin,
+        username,
+        email,
+        isAdmin: coachForm.isAdmin,
         isActive: true,
       });
       setCoaches((prev) => [...prev, created].sort((a, b) => a.username.localeCompare(b.username)));
-      setNewCoachUsername('');
-      setNewCoachEmail('');
-      setNewCoachPassword('');
-      setNewCoachAdmin(false);
+      setCoachForm(EMPTY_COACH_FORM);
+      setAddingCoach(false);
       setError(null);
     } catch {
       setError('Could not create coach.');
     }
   }
 
-  async function handleUpdateCoach(coach: AdminCoach, patch: Partial<{ email: string; isAdmin: boolean; isActive: boolean }>) {
+  async function handleSaveCoachEdit() {
+    if (!editingCoach) return;
+
+    const email = sanitizeInputEmail(editingCoach.email);
+    if (!isValidInputEmail(email)) {
+      setError('Please enter a valid coach email.');
+      return;
+    }
+
     try {
-      const updated = await updateAdminCoach(coach.id, patch);
+      const updated = await updateAdminCoach(editingCoach.id, {
+        email,
+        isAdmin: editingCoach.isAdmin,
+        isActive: editingCoach.isActive,
+      });
       setCoaches((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setEditingCoach(null);
       setError(null);
     } catch {
       setError('Could not update coach.');
@@ -95,27 +140,50 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
 
   async function handleCreateCoachee(event: React.FormEvent) {
     event.preventDefault();
-    if (!newCoacheeName.trim()) return;
+    const name = sanitizeInput(coacheeForm.name, 255);
+    const email = sanitizeInputEmail(coacheeForm.email);
+    const notes = sanitizeInput(coacheeForm.notes, 2000);
+
+    if (!name) {
+      setError('Coachee name is required.');
+      return;
+    }
+    if (!isValidInputEmail(email)) {
+      setError('Please enter a valid coachee email.');
+      return;
+    }
+
     try {
-      const created = await createAdminCoachee({
-        name: newCoacheeName.trim(),
-        email: newCoacheeEmail.trim(),
-        notes: newCoacheeNotes.trim(),
-      });
+      const created = await createAdminCoachee({ name, email, notes });
       setCoachees((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
-      setNewCoacheeName('');
-      setNewCoacheeEmail('');
-      setNewCoacheeNotes('');
+      setCoacheeForm(EMPTY_COACHEE_FORM);
+      setAddingCoachee(false);
       setError(null);
     } catch {
       setError('Could not create coachee.');
     }
   }
 
-  async function handleUpdateCoachee(coachee: AdminCoachee, patch: Partial<{ name: string; email: string; notes: string }>) {
+  async function handleSaveCoacheeEdit() {
+    if (!editingCoachee) return;
+
+    const name = sanitizeInput(editingCoachee.name, 255);
+    const email = sanitizeInputEmail(editingCoachee.email);
+    const notes = sanitizeInput(editingCoachee.notes, 2000);
+
+    if (!name) {
+      setError('Coachee name is required.');
+      return;
+    }
+    if (!isValidInputEmail(email)) {
+      setError('Please enter a valid coachee email.');
+      return;
+    }
+
     try {
-      const updated = await updateAdminCoachee(coachee.id, patch);
+      const updated = await updateAdminCoachee(editingCoachee.id, { name, email, notes });
       setCoachees((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setEditingCoachee(null);
       setError(null);
     } catch {
       setError('Could not update coachee.');
@@ -146,58 +214,25 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
 
       {currentUser.isAdmin && (
         <div className='card' style={{ marginBottom: 20 }}>
-          <h3>Coaches</h3>
-          <form onSubmit={handleCreateCoach} style={{ marginBottom: 12 }}>
-            <label>
-              Username
-              <input value={newCoachUsername} onChange={(event) => setNewCoachUsername(event.target.value)} required />
-            </label>
-            <label>
-              Email
-              <input type='email' value={newCoachEmail} onChange={(event) => setNewCoachEmail(event.target.value)} />
-            </label>
-            <label>
-              Temporary password
-              <input type='password' value={newCoachPassword} onChange={(event) => setNewCoachPassword(event.target.value)} />
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-              <input
-                type='checkbox'
-                checked={newCoachAdmin}
-                onChange={(event) => setNewCoachAdmin(event.target.checked)}
-                style={{ width: 'auto', marginTop: 0 }}
-              />
-              Grant administrator access
-            </label>
-            <button type='submit' className='primary'>Add coach</button>
-          </form>
+          <div className='admin-panel-header'>
+            <h3>Coaches</h3>
+            <button type='button' className='primary' onClick={() => setAddingCoach(true)}>Add coach</button>
+          </div>
 
           <div style={{ display: 'grid', gap: 8 }}>
             {coaches.map((coach) => (
-              <div key={coach.id} className='card' style={{ marginBottom: 0 }}>
-                <strong>{coach.username}</strong>
-                <p className='muted' style={{ margin: '6px 0' }}>{coach.email || 'No email'}</p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-                  <input
-                    type='checkbox'
-                    checked={coach.isAdmin}
-                    onChange={(event) => void handleUpdateCoach(coach, { isAdmin: event.target.checked })}
-                    style={{ width: 'auto', marginTop: 0 }}
-                  />
-                  Administrator
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
-                  <input
-                    type='checkbox'
-                    checked={coach.isActive}
-                    onChange={(event) => void handleUpdateCoach(coach, { isActive: event.target.checked })}
-                    style={{ width: 'auto', marginTop: 0 }}
-                  />
-                  Active account
-                </label>
-                <button type='button' onClick={() => void handleDeleteCoach(coach.id)} style={{ marginTop: 8 }}>
-                  Remove coach
-                </button>
+              <div key={coach.id} className='admin-panel-row'>
+                <div>
+                  <strong>{coach.username}</strong>
+                  <p className='muted' style={{ margin: '4px 0' }}>{coach.email || 'No email'}</p>
+                  <p className='muted' style={{ margin: 0 }}>
+                    {coach.isAdmin ? 'Administrator' : 'Coach'} · {coach.isActive ? 'Active' : 'Inactive'}
+                  </p>
+                </div>
+                <div className='admin-panel-actions'>
+                  <button type='button' onClick={() => setEditingCoach(coach)}>Edit</button>
+                  <button type='button' onClick={() => void handleDeleteCoach(coach.id)}>Remove</button>
+                </div>
               </div>
             ))}
             {!loading && coaches.length === 0 && <p className='muted'>No coaches found.</p>}
@@ -206,69 +241,174 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
       )}
 
       <div className='card'>
-        <h3>Coachees</h3>
-        <form onSubmit={handleCreateCoachee} style={{ marginBottom: 12 }}>
-          <label>
-            Name
-            <input value={newCoacheeName} onChange={(event) => setNewCoacheeName(event.target.value)} required />
-          </label>
-          <label>
-            Email
-            <input type='email' value={newCoacheeEmail} onChange={(event) => setNewCoacheeEmail(event.target.value)} />
-          </label>
-          <label>
-            Notes
-            <textarea rows={2} value={newCoacheeNotes} onChange={(event) => setNewCoacheeNotes(event.target.value)} />
-          </label>
-          <button type='submit' className='primary'>Add coachee</button>
-        </form>
+        <div className='admin-panel-header'>
+          <h3>Coachees</h3>
+          <button type='button' className='primary' onClick={() => setAddingCoachee(true)}>Add coachee</button>
+        </div>
 
         <div style={{ display: 'grid', gap: 8 }}>
           {coachees.map((coachee) => (
-            <div key={coachee.id} className='card' style={{ marginBottom: 0 }}>
+            <div key={coachee.id} className='admin-panel-row'>
+              <div>
+                <strong>{coachee.name}</strong>
+                <p className='muted' style={{ margin: '4px 0' }}>{coachee.email || 'No email'}</p>
+                {currentUser.isAdmin && <p className='muted' style={{ margin: 0 }}>Added by: {coachee.addedByUsername || 'Unknown'}</p>}
+              </div>
+              <div className='admin-panel-actions'>
+                <button type='button' onClick={() => setEditingCoachee(coachee)}>Edit</button>
+                <button type='button' onClick={() => void handleDeleteCoachee(coachee.id)}>Remove</button>
+              </div>
+            </div>
+          ))}
+          {!loading && coachees.length === 0 && <p className='muted'>No coachees found.</p>}
+        </div>
+      </div>
+
+      {addingCoach && (
+        <div className='admin-panel-modal-overlay'>
+          <div className='admin-panel-modal-card'>
+            <button type='button' aria-label='Close add coach dialog' onClick={() => setAddingCoach(false)} className='admin-panel-modal-close'>x</button>
+            <h3>Add coach</h3>
+            <form onSubmit={handleCreateCoach}>
               <label>
-                Name
+                Username
                 <input
-                  value={coachee.name}
-                  onChange={(event) => {
-                    const name = event.target.value;
-                    setCoachees((prev) => prev.map((item) => (item.id === coachee.id ? { ...item, name } : item)));
-                  }}
-                  onBlur={() => void handleUpdateCoachee(coachee, { name: coachee.name })}
+                  value={coachForm.username}
+                  onChange={(event) => setCoachForm((prev) => ({ ...prev, username: event.target.value }))}
+                  required
                 />
               </label>
               <label>
                 Email
                 <input
-                  value={coachee.email}
-                  onChange={(event) => {
-                    const email = event.target.value;
-                    setCoachees((prev) => prev.map((item) => (item.id === coachee.id ? { ...item, email } : item)));
-                  }}
-                  onBlur={() => void handleUpdateCoachee(coachee, { email: coachee.email })}
+                  type='email'
+                  value={coachForm.email}
+                  onChange={(event) => setCoachForm((prev) => ({ ...prev, email: event.target.value }))}
+                />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                <input
+                  type='checkbox'
+                  checked={coachForm.isAdmin}
+                  onChange={(event) => setCoachForm((prev) => ({ ...prev, isAdmin: event.target.checked }))}
+                  style={{ width: 'auto', marginTop: 0 }}
+                />
+                Grant administrator access
+              </label>
+              <button type='submit' className='primary'>Create coach</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {editingCoach && (
+        <div className='admin-panel-modal-overlay'>
+          <div className='admin-panel-modal-card'>
+            <button type='button' aria-label='Close coach editor' onClick={() => setEditingCoach(null)} className='admin-panel-modal-close'>x</button>
+            <h3>Edit coach: {editingCoach.username}</h3>
+            <label>
+              Email
+              <input
+                type='email'
+                value={editingCoach.email}
+                onChange={(event) => setEditingCoach({ ...editingCoach, email: event.target.value })}
+              />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <input
+                type='checkbox'
+                checked={editingCoach.isAdmin}
+                onChange={(event) => setEditingCoach({ ...editingCoach, isAdmin: event.target.checked })}
+                style={{ width: 'auto', marginTop: 0 }}
+              />
+              Administrator
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <input
+                type='checkbox'
+                checked={editingCoach.isActive}
+                onChange={(event) => setEditingCoach({ ...editingCoach, isActive: event.target.checked })}
+                style={{ width: 'auto', marginTop: 0 }}
+              />
+              Active account
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+              <button type='button' className='primary' onClick={() => void handleSaveCoachEdit()}>Save coach</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {addingCoachee && (
+        <div className='admin-panel-modal-overlay'>
+          <div className='admin-panel-modal-card'>
+            <button type='button' aria-label='Close add coachee dialog' onClick={() => setAddingCoachee(false)} className='admin-panel-modal-close'>x</button>
+            <h3>Add coachee</h3>
+            <form onSubmit={handleCreateCoachee}>
+              <label>
+                Name
+                <input
+                  value={coacheeForm.name}
+                  onChange={(event) => setCoacheeForm((prev) => ({ ...prev, name: event.target.value }))}
+                  required
+                />
+              </label>
+              <label>
+                Email
+                <input
+                  type='email'
+                  value={coacheeForm.email}
+                  onChange={(event) => setCoacheeForm((prev) => ({ ...prev, email: event.target.value }))}
                 />
               </label>
               <label>
                 Notes
                 <textarea
                   rows={2}
-                  value={coachee.notes}
-                  onChange={(event) => {
-                    const notes = event.target.value;
-                    setCoachees((prev) => prev.map((item) => (item.id === coachee.id ? { ...item, notes } : item)));
-                  }}
-                  onBlur={() => void handleUpdateCoachee(coachee, { notes: coachee.notes })}
+                  value={coacheeForm.notes}
+                  onChange={(event) => setCoacheeForm((prev) => ({ ...prev, notes: event.target.value }))}
                 />
               </label>
-              {currentUser.isAdmin && <p className='muted'>Added by: {coachee.addedByUsername || 'Unknown'}</p>}
-              <button type='button' onClick={() => void handleDeleteCoachee(coachee.id)}>
-                Remove coachee
-              </button>
-            </div>
-          ))}
-          {!loading && coachees.length === 0 && <p className='muted'>No coachees found.</p>}
+              <button type='submit' className='primary'>Create coachee</button>
+            </form>
+          </div>
         </div>
-      </div>
+      )}
+
+      {editingCoachee && (
+        <div className='admin-panel-modal-overlay'>
+          <div className='admin-panel-modal-card'>
+            <button type='button' aria-label='Close coachee editor' onClick={() => setEditingCoachee(null)} className='admin-panel-modal-close'>x</button>
+            <h3>Edit coachee</h3>
+            <label>
+              Name
+              <input
+                value={editingCoachee.name}
+                onChange={(event) => setEditingCoachee({ ...editingCoachee, name: event.target.value })}
+              />
+            </label>
+            <label>
+              Email
+              <input
+                type='email'
+                value={editingCoachee.email}
+                onChange={(event) => setEditingCoachee({ ...editingCoachee, email: event.target.value })}
+              />
+            </label>
+            <label>
+              Notes
+              <textarea
+                rows={3}
+                value={editingCoachee.notes}
+                onChange={(event) => setEditingCoachee({ ...editingCoachee, notes: event.target.value })}
+              />
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+              <button type='button' className='primary' onClick={() => void handleSaveCoacheeEdit()}>Save coachee</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
