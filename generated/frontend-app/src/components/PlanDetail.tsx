@@ -48,11 +48,10 @@ export function PlanDetail({ plan, coachees, coaches, onBack, onPlanUpdated }: P
   const coacheeName = plan.coacheeName ?? coachees.find((c) => c.id === plan.coacheeId)?.name ?? null;
   const assigneeOptions = useMemo(() => {
     const values = new Set<string>();
-    coaches.forEach((coach) => values.add(coach.username));
+    coaches.filter((coach) => !coach.isAdmin).forEach((coach) => values.add(coach.username));
     coachees.forEach((coachee) => values.add(coachee.name));
-    if (currentUsername) values.add(currentUsername);
     return Array.from(values).sort((a, b) => a.localeCompare(b));
-  }, [coaches, coachees, currentUsername]);
+  }, [coaches, coachees]);
 
   useEffect(() => {
     if (!assignee && assigneeOptions.length > 0) {

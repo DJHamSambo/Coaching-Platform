@@ -56,4 +56,4 @@ class CoachDirectoryListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return User.objects.filter(is_active=True).order_by("username")
+        return User.objects.filter(is_active=True, is_staff=False).order_by("username")
