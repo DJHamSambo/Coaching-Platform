@@ -9,6 +9,7 @@ import {
   updateAdminCoachee,
   updateAdminCoach,
 } from '../api';
+import { isValidInputEmail, sanitizeInput, sanitizeInputEmail } from './adminFormUtils';
 import type { AdminCoachee, AdminCoach, CurrentUser } from '../types';
 
 interface AdministrationPanelProps {
@@ -18,7 +19,6 @@ interface AdministrationPanelProps {
 interface CoachFormState {
   username: string;
   email: string;
-  password: string;
   isAdmin: boolean;
 }
 
@@ -28,27 +28,9 @@ interface CoacheeFormState {
   notes: string;
 }
 
-function sanitizeText(value: string, maxLength: number): string {
-  return value
-    .replace(/[<>]/g, '')
-    .replace(/[\u0000-\u001F\u007F]/g, '')
-    .trim()
-    .slice(0, maxLength);
-}
-
-function sanitizeEmail(value: string): string {
-  return sanitizeText(value, 254).toLowerCase();
-}
-
-function isValidEmail(value: string): boolean {
-  if (!value) return true;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
 const EMPTY_COACH_FORM: CoachFormState = {
   username: '',
   email: '',
-  password: '',
   isAdmin: false,
 };
 
@@ -95,15 +77,14 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
 
   async function handleCreateCoach(event: React.FormEvent) {
     event.preventDefault();
-    const username = sanitizeText(coachForm.username, 150);
-    const email = sanitizeEmail(coachForm.email);
-    const password = sanitizeText(coachForm.password, 128);
+    const username = sanitizeInput(coachForm.username, 150);
+    const email = sanitizeInputEmail(coachForm.email);
 
     if (!username) {
       setError('Coach username is required.');
       return;
     }
-    if (!isValidEmail(email)) {
+    if (!isValidInputEmail(email)) {
       setError('Please enter a valid coach email.');
       return;
     }
@@ -112,7 +93,6 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
       const created = await createAdminCoach({
         username,
         email,
-        password: password || undefined,
         isAdmin: coachForm.isAdmin,
         isActive: true,
       });
@@ -128,8 +108,8 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
   async function handleSaveCoachEdit() {
     if (!editingCoach) return;
 
-    const email = sanitizeEmail(editingCoach.email);
-    if (!isValidEmail(email)) {
+    const email = sanitizeInputEmail(editingCoach.email);
+    if (!isValidInputEmail(email)) {
       setError('Please enter a valid coach email.');
       return;
     }
@@ -160,15 +140,15 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
 
   async function handleCreateCoachee(event: React.FormEvent) {
     event.preventDefault();
-    const name = sanitizeText(coacheeForm.name, 255);
-    const email = sanitizeEmail(coacheeForm.email);
-    const notes = sanitizeText(coacheeForm.notes, 2000);
+    const name = sanitizeInput(coacheeForm.name, 255);
+    const email = sanitizeInputEmail(coacheeForm.email);
+    const notes = sanitizeInput(coacheeForm.notes, 2000);
 
     if (!name) {
       setError('Coachee name is required.');
       return;
     }
-    if (!isValidEmail(email)) {
+    if (!isValidInputEmail(email)) {
       setError('Please enter a valid coachee email.');
       return;
     }
@@ -187,15 +167,15 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
   async function handleSaveCoacheeEdit() {
     if (!editingCoachee) return;
 
-    const name = sanitizeText(editingCoachee.name, 255);
-    const email = sanitizeEmail(editingCoachee.email);
-    const notes = sanitizeText(editingCoachee.notes, 2000);
+    const name = sanitizeInput(editingCoachee.name, 255);
+    const email = sanitizeInputEmail(editingCoachee.email);
+    const notes = sanitizeInput(editingCoachee.notes, 2000);
 
     if (!name) {
       setError('Coachee name is required.');
       return;
     }
-    if (!isValidEmail(email)) {
+    if (!isValidInputEmail(email)) {
       setError('Please enter a valid coachee email.');
       return;
     }
@@ -234,14 +214,14 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
 
       {currentUser.isAdmin && (
         <div className='card' style={{ marginBottom: 20 }}>
-          <div className='admin-header'>
+          <div className='admin-panel-header'>
             <h3>Coaches</h3>
             <button type='button' className='primary' onClick={() => setAddingCoach(true)}>Add coach</button>
           </div>
 
           <div style={{ display: 'grid', gap: 8 }}>
             {coaches.map((coach) => (
-              <div key={coach.id} className='admin-row'>
+              <div key={coach.id} className='admin-panel-row'>
                 <div>
                   <strong>{coach.username}</strong>
                   <p className='muted' style={{ margin: '4px 0' }}>{coach.email || 'No email'}</p>
@@ -249,7 +229,7 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
                     {coach.isAdmin ? 'Administrator' : 'Coach'} · {coach.isActive ? 'Active' : 'Inactive'}
                   </p>
                 </div>
-                <div className='admin-actions'>
+                <div className='admin-panel-actions'>
                   <button type='button' onClick={() => setEditingCoach(coach)}>Edit</button>
                   <button type='button' onClick={() => void handleDeleteCoach(coach.id)}>Remove</button>
                 </div>
@@ -261,20 +241,20 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
       )}
 
       <div className='card'>
-        <div className='admin-header'>
+        <div className='admin-panel-header'>
           <h3>Coachees</h3>
           <button type='button' className='primary' onClick={() => setAddingCoachee(true)}>Add coachee</button>
         </div>
 
         <div style={{ display: 'grid', gap: 8 }}>
           {coachees.map((coachee) => (
-            <div key={coachee.id} className='admin-row'>
+            <div key={coachee.id} className='admin-panel-row'>
               <div>
                 <strong>{coachee.name}</strong>
                 <p className='muted' style={{ margin: '4px 0' }}>{coachee.email || 'No email'}</p>
                 {currentUser.isAdmin && <p className='muted' style={{ margin: 0 }}>Added by: {coachee.addedByUsername || 'Unknown'}</p>}
               </div>
-              <div className='admin-actions'>
+              <div className='admin-panel-actions'>
                 <button type='button' onClick={() => setEditingCoachee(coachee)}>Edit</button>
                 <button type='button' onClick={() => void handleDeleteCoachee(coachee.id)}>Remove</button>
               </div>
@@ -285,9 +265,9 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
       </div>
 
       {addingCoach && (
-        <div className='admin-modal-overlay'>
-          <div className='admin-modal-card'>
-            <button type='button' aria-label='Close add coach dialog' onClick={() => setAddingCoach(false)} className='admin-modal-close'>x</button>
+        <div className='admin-panel-modal-overlay'>
+          <div className='admin-panel-modal-card'>
+            <button type='button' aria-label='Close add coach dialog' onClick={() => setAddingCoach(false)} className='admin-panel-modal-close'>x</button>
             <h3>Add coach</h3>
             <form onSubmit={handleCreateCoach}>
               <label>
@@ -306,14 +286,6 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
                   onChange={(event) => setCoachForm((prev) => ({ ...prev, email: event.target.value }))}
                 />
               </label>
-              <label>
-                Temporary password
-                <input
-                  type='password'
-                  value={coachForm.password}
-                  onChange={(event) => setCoachForm((prev) => ({ ...prev, password: event.target.value }))}
-                />
-              </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
                 <input
                   type='checkbox'
@@ -330,9 +302,9 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
       )}
 
       {editingCoach && (
-        <div className='admin-modal-overlay'>
-          <div className='admin-modal-card'>
-            <button type='button' aria-label='Close coach editor' onClick={() => setEditingCoach(null)} className='admin-modal-close'>x</button>
+        <div className='admin-panel-modal-overlay'>
+          <div className='admin-panel-modal-card'>
+            <button type='button' aria-label='Close coach editor' onClick={() => setEditingCoach(null)} className='admin-panel-modal-close'>x</button>
             <h3>Edit coach: {editingCoach.username}</h3>
             <label>
               Email
@@ -368,9 +340,9 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
       )}
 
       {addingCoachee && (
-        <div className='admin-modal-overlay'>
-          <div className='admin-modal-card'>
-            <button type='button' aria-label='Close add coachee dialog' onClick={() => setAddingCoachee(false)} className='admin-modal-close'>x</button>
+        <div className='admin-panel-modal-overlay'>
+          <div className='admin-panel-modal-card'>
+            <button type='button' aria-label='Close add coachee dialog' onClick={() => setAddingCoachee(false)} className='admin-panel-modal-close'>x</button>
             <h3>Add coachee</h3>
             <form onSubmit={handleCreateCoachee}>
               <label>
@@ -404,9 +376,9 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
       )}
 
       {editingCoachee && (
-        <div className='admin-modal-overlay'>
-          <div className='admin-modal-card'>
-            <button type='button' aria-label='Close coachee editor' onClick={() => setEditingCoachee(null)} className='admin-modal-close'>x</button>
+        <div className='admin-panel-modal-overlay'>
+          <div className='admin-panel-modal-card'>
+            <button type='button' aria-label='Close coachee editor' onClick={() => setEditingCoachee(null)} className='admin-panel-modal-close'>x</button>
             <h3>Edit coachee</h3>
             <label>
               Name
