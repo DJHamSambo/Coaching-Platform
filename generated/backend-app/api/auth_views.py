@@ -28,7 +28,13 @@ def register(request: Request) -> Response:
 @permission_classes([IsAuthenticated])
 def me(request: Request) -> Response:
     user = request.user
-    return Response({"id": user.pk, "username": user.username, "email": user.email})
+    return Response({
+        "id": user.pk,
+        "username": user.username,
+        "email": user.email,
+        "is_admin": bool(user.is_staff),
+        "role": "admin" if user.is_staff else "coach",
+    })
 
 
 @api_view(["GET"])

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createAction, createDiscussion, getCurrentUsername, listActions, listDiscussions, updateAction, updateActionStatus, updatePlan } from '../api';
-import type { Coachee, CoachingPlan, DiscussionItem, PlanAction, TaskStatus } from '../types';
+import type { AdminCoach, AdminCoachee, CoachingPlan, DiscussionItem, PlanAction, TaskStatus } from '../types';
 
 interface PlanDetailProps {
   plan: CoachingPlan;
-  coachees: Coachee[];
+  coachees: AdminCoachee[];
+  coaches: AdminCoach[];
   onBack: () => void;
   onPlanUpdated: (plan: CoachingPlan) => void;
 }
@@ -17,7 +18,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 
 const STATUS_OPTIONS: TaskStatus[] = ['backlog', 'inProgress', 'done'];
 
-export function PlanDetail({ plan, coachees, onBack, onPlanUpdated }: PlanDetailProps) {
+export function PlanDetail({ plan, coachees, coaches, onBack, onPlanUpdated }: PlanDetailProps) {
   const [actions, setActions] = useState<PlanAction[]>([]);
   const [discussions, setDiscussions] = useState<DiscussionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,11 +41,24 @@ export function PlanDetail({ plan, coachees, onBack, onPlanUpdated }: PlanDetail
   // New action form state
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [assignee, setAssignee] = useState('Coachee');
+  const [assignee, setAssignee] = useState('');
   const [dueDate, setDueDate] = useState('');
   const currentUsername = useMemo(() => getCurrentUsername(), []);
 
   const coacheeName = plan.coacheeName ?? coachees.find((c) => c.id === plan.coacheeId)?.name ?? null;
+  const assigneeOptions = useMemo(() => {
+    const values = new Set<string>();
+    coaches.forEach((coach) => values.add(coach.username));
+    coachees.forEach((coachee) => values.add(coachee.name));
+    if (currentUsername) values.add(currentUsername);
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [coaches, coachees, currentUsername]);
+
+  useEffect(() => {
+    if (!assignee && assigneeOptions.length > 0) {
+      setAssignee(assigneeOptions[0]);
+    }
+  }, [assignee, assigneeOptions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -398,9 +412,9 @@ export function PlanDetail({ plan, coachees, onBack, onPlanUpdated }: PlanDetail
               <label>
                 Assignee
                 <select value={assignee} onChange={(event) => setAssignee(event.target.value)}>
-                  <option value='Coachee'>Coachee</option>
-                  <option value='Coach'>Coach</option>
-                  {coacheeName && coacheeName !== 'Coachee' && <option value={coacheeName}>{coacheeName}</option>}
+                  {assigneeOptions.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
                 </select>
               </label>
               <label>
@@ -447,10 +461,14 @@ export function PlanDetail({ plan, coachees, onBack, onPlanUpdated }: PlanDetail
             </label>
             <label>
               Assignee
-              <input
+              <select
                 value={activeAction.assignee}
                 onChange={(event) => setActiveAction({ ...activeAction, assignee: event.target.value })}
-              />
+              >
+                {assigneeOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
             </label>
             <label>
               Status

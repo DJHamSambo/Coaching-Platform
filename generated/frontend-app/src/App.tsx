@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PlanList } from './components/PlanList';
 import { PlanDetail } from './components/PlanDetail';
-import { CoacheesManager } from './components/CoacheesManager';
-import { createPlan, listCoachees, listPlans } from './api';
-import {
-  requirementTitle,
-} from './data/seed';
-import type { Coachee, CoachingPlan } from './types';
+import { AdministrationPanel } from './components/AdministrationPanel';
+import { LoginScreen } from './components/LoginScreen';
+import { clearToken, createPlan, getMe, getToken, listAdminCoachees, listCoachDirectory, listPlans } from './api';
+import { requirementTitle } from './data/seed';
+import type { AdminCoachee, AdminCoach, CoachingPlan, CurrentUser } from './types';
 
 const MODULES = [
   { key: 'plans', label: 'Coaching Plans', enabled: true },
-  { key: 'coachees', label: 'Coachees', enabled: true },
+  { key: 'administration', label: 'Administration', enabled: true },
 ] as const;
 
 type ModuleKey = (typeof MODULES)[number]['key'];
@@ -19,33 +18,95 @@ export default function App() {
   const enabledModules = useMemo(() => MODULES.filter((item) => item.enabled), []);
   const [activeModule, setActiveModule] = useState<ModuleKey>(enabledModules[0]?.key ?? 'plans');
 
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
   const [plans, setPlans] = useState<CoachingPlan[]>([]);
   const [plansLoading, setPlansLoading] = useState(true);
   const [plansError, setPlansError] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<CoachingPlan | null>(null);
-  const [coachees, setCoachees] = useState<Coachee[]>([]);
+
+  const [coachees, setCoachees] = useState<AdminCoachee[]>([]);
+  const [coaches, setCoaches] = useState<AdminCoach[]>([]);
   const [coacheesLoading, setCoacheesLoading] = useState(true);
   const [coacheesError, setCoacheesError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setPlansLoading(true);
-    listPlans()
-      .then((data) => { if (!cancelled) { setPlans(data); setPlansError(null); } })
-      .catch(() => { if (!cancelled) setPlansError('Could not load plans. Showing local data.'); })
-      .finally(() => { if (!cancelled) setPlansLoading(false); });
-    return () => { cancelled = true; };
+    if (!getToken()) {
+      setAuthLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    getMe()
+      .then((user) => {
+        if (!cancelled) {
+          setCurrentUser(user);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          clearToken();
+          setCurrentUser(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAuthLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+    setPlansLoading(true);
+    listPlans()
+      .then((data) => {
+        if (!cancelled) {
+          setPlans(data);
+          setPlansError(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPlansError('Could not load plans.');
+      })
+      .finally(() => {
+        if (!cancelled) setPlansLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
     let cancelled = false;
     setCoacheesLoading(true);
-    listCoachees()
-      .then((data) => { if (!cancelled) { setCoachees(data); setCoacheesError(null); } })
-      .catch(() => { if (!cancelled) setCoacheesError('Could not load coachees.'); })
-      .finally(() => { if (!cancelled) setCoacheesLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
+    Promise.all([listAdminCoachees(), listCoachDirectory()])
+      .then(([coacheesData, coachesData]) => {
+        if (!cancelled) {
+          setCoachees(coacheesData);
+          setCoaches(coachesData);
+          setCoacheesError(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setCoacheesError('Could not load coachees.');
+      })
+      .finally(() => {
+        if (!cancelled) setCoacheesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
 
   async function handleCreatePlan(planData: Omit<CoachingPlan, 'id' | 'createdAt' | 'coacheeName'>): Promise<void> {
     try {
@@ -62,12 +123,48 @@ export default function App() {
     setSelectedPlan(updated);
   }
 
+  async function handleAuthenticated(): Promise<void> {
+    try {
+      const user = await getMe();
+      setCurrentUser(user);
+      setActiveModule('plans');
+    } catch {
+      setCurrentUser(null);
+    }
+    setAuthLoading(false);
+  }
+
+  function handleLogout(): void {
+    clearToken();
+    setCurrentUser(null);
+    setSelectedPlan(null);
+    setActiveModule('plans');
+  }
+
+  if (authLoading) {
+    return (
+      <main className='app-shell'>
+        <p className='muted'>Loading session...</p>
+      </main>
+    );
+  }
+
+  if (!currentUser) {
+    return <LoginScreen onAuthenticated={() => { void handleAuthenticated(); }} />;
+  }
+
   return (
     <main className='app-shell'>
       <header className='hero'>
         <p className='eyebrow'>Frontend Developer Agent Output</p>
         <h1>{requirementTitle}</h1>
         <p className='subtitle'>Coaches can create one to many coaching plans for a coachee.</p>
+        <p className='muted' style={{ marginTop: 8 }}>
+          Signed in as {currentUser.username} ({currentUser.role})
+        </p>
+        <button type='button' onClick={handleLogout} style={{ marginTop: 8 }}>
+          Sign out
+        </button>
       </header>
 
       <nav className='module-tabs' aria-label='Feature modules'>
@@ -89,7 +186,9 @@ export default function App() {
             plans={plans}
             coachees={coachees}
             onSelectPlan={setSelectedPlan}
-            onCreatePlan={(data) => { void handleCreatePlan(data); }}
+            onCreatePlan={(data) => {
+              void handleCreatePlan(data);
+            }}
             loading={plansLoading}
             error={plansError}
           />
@@ -99,20 +198,13 @@ export default function App() {
           <PlanDetail
             plan={selectedPlan}
             coachees={coachees}
+            coaches={coaches}
             onBack={() => setSelectedPlan(null)}
             onPlanUpdated={handlePlanUpdated}
           />
         )}
 
-        {activeModule === 'coachees' && (
-          <CoacheesManager
-            coachees={coachees}
-            onAdded={(c) => setCoachees((prev) => [...prev, c])}
-            loading={coacheesLoading}
-            error={coacheesError}
-          />
-        )}
-
+        {activeModule === 'administration' && <AdministrationPanel currentUser={currentUser} />}
       </section>
     </main>
   );

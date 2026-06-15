@@ -1,6 +1,8 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+from api.auth_views import register, me, health
+from api.administration_views import CoachesListView, CoachesDetailView, AdminCoacheesListView, AdminCoacheesDetailView, CoachDirectoryListView
 from api.users_views import UsersListView, UsersDetailView
 from api.tasks_views import TasksListView, TasksDetailView
 from api.messages_views import MessagesListView, MessagesDetailView
@@ -8,8 +10,18 @@ from api.coachees_views import CoacheesListView, CoacheesDetailView
 from api.plans_views import PlansListView, PlansDetailView, PlanActionsListView, PlanActionsDetailView
 
 urlpatterns = [
+    path("api/auth/register/", register, name="register"),
+    path("api/auth/me/", me, name="me"),
+    path("api/auth/health/", health, name="health"),
     path("api/auth/login", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("api/auth/login/", TokenObtainPairView.as_view(), name="token_obtain_pair_slash"),
     path("api/auth/refresh", TokenRefreshView.as_view(), name="token_refresh"),
+    path("api/auth/refresh/", TokenRefreshView.as_view(), name="token_refresh_slash"),
+    path("api/admin/coaches/", CoachesListView.as_view(), name="admin-coaches-list"),
+    path("api/admin/coaches/<int:pk>/", CoachesDetailView.as_view(), name="admin-coaches-detail"),
+    path("api/admin/coach-directory/", CoachDirectoryListView.as_view(), name="admin-coach-directory-list"),
+    path("api/admin/coachees/", AdminCoacheesListView.as_view(), name="admin-coachees-list"),
+    path("api/admin/coachees/<int:pk>/", AdminCoacheesDetailView.as_view(), name="admin-coachees-detail"),
     path("api/users/", UsersListView.as_view(), name="users-list"),
     path("api/users/<int:pk>/", UsersDetailView.as_view(), name="users-detail"),
     # Coachees (people managed by coaches)

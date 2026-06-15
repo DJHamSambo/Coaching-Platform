@@ -8,6 +8,27 @@ export interface Coachee {
   notes: string;
 }
 
+export interface CurrentUser {
+  id: string;
+  username: string;
+  email: string;
+  role: 'admin' | 'coach';
+  isAdmin: boolean;
+}
+
+export interface AdminCoach {
+  id: string;
+  username: string;
+  email: string;
+  isAdmin: boolean;
+  isActive: boolean;
+}
+
+export interface AdminCoachee extends Coachee {
+  addedById: string;
+  addedByUsername: string;
+}
+
 export interface CoachingPlan {
   id: string;
   title: string;

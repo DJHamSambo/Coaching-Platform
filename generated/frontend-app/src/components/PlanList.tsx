@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import type { Coachee, CoachingPlan, PlanStatus } from '../types';
+import type { AdminCoachee, CoachingPlan, PlanStatus } from '../types';
 
 interface PlanListProps {
   plans: CoachingPlan[];
-  coachees: Coachee[];
+  coachees: AdminCoachee[];
   onSelectPlan: (plan: CoachingPlan) => void;
   onCreatePlan: (plan: Omit<CoachingPlan, 'id' | 'createdAt' | 'coacheeName'>) => void;
   loading: boolean;

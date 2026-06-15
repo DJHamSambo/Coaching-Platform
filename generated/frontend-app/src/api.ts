@@ -1,7 +1,7 @@
 // API client — talks to the Django backend at http://localhost:8000
 // All calls attach the stored JWT token automatically.
 
-import type { Coachee, CoachingPlan, DiscussionItem, PlanAction, PlanStatus, PlanTask, TaskStatus } from './types';
+import type { AdminCoachee, AdminCoach, Coachee, CoachingPlan, CurrentUser, DiscussionItem, PlanAction, PlanStatus, PlanTask, TaskStatus } from './types';
 
 const BASE_URL = 'http://127.0.0.1:8000';
 const TOKEN_KEY = 'coaching_jwt';
@@ -77,6 +77,25 @@ export async function login(payload: LoginPayload): Promise<AuthTokens> {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+interface ApiMe {
+  id: number;
+  username: string;
+  email: string;
+  is_admin: boolean;
+  role: 'admin' | 'coach';
+}
+
+export async function getMe(): Promise<CurrentUser> {
+  const me = await request<ApiMe>('/api/auth/me/');
+  return {
+    id: String(me.id),
+    username: me.username,
+    email: me.email,
+    role: me.role,
+    isAdmin: me.is_admin,
+  };
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -216,10 +235,23 @@ interface ApiCoachee {
   name: string;
   email: string;
   notes: string;
+  added_by?: number;
+  added_by_username?: string;
 }
 
 function toCoachee(c: ApiCoachee): Coachee {
   return { id: String(c.id), name: c.name, email: c.email, notes: c.notes };
+}
+
+function toAdminCoachee(c: ApiCoachee): AdminCoachee {
+  return {
+    id: String(c.id),
+    name: c.name,
+    email: c.email,
+    notes: c.notes,
+    addedById: c.added_by ? String(c.added_by) : '',
+    addedByUsername: c.added_by_username ?? '',
+  };
 }
 
 export async function listCoachees(): Promise<Coachee[]> {
@@ -233,6 +265,107 @@ export async function createCoachee(payload: { name: string; email?: string; not
     body: JSON.stringify(payload),
   });
   return toCoachee(created);
+}
+
+// ---------------------------------------------------------------------------
+// Administration
+// ---------------------------------------------------------------------------
+
+interface ApiCoach {
+  id: number;
+  username: string;
+  email: string;
+  is_staff: boolean;
+  is_active: boolean;
+}
+
+function toAdminCoach(coach: ApiCoach): AdminCoach {
+  return {
+    id: String(coach.id),
+    username: coach.username,
+    email: coach.email,
+    isAdmin: coach.is_staff,
+    isActive: coach.is_active,
+  };
+}
+
+export async function listAdminCoaches(): Promise<AdminCoach[]> {
+  const items = await request<ApiCoach[]>('/api/admin/coaches/');
+  return items.map(toAdminCoach);
+}
+
+export async function listCoachDirectory(): Promise<AdminCoach[]> {
+  const items = await request<ApiCoach[]>('/api/admin/coach-directory/');
+  return items.map(toAdminCoach);
+}
+
+export async function createAdminCoach(payload: {
+  username: string;
+  email?: string;
+  password?: string;
+  isAdmin: boolean;
+  isActive: boolean;
+}): Promise<AdminCoach> {
+  const created = await request<ApiCoach>('/api/admin/coaches/', {
+    method: 'POST',
+    body: JSON.stringify({
+      username: payload.username,
+      email: payload.email ?? '',
+      password: payload.password ?? '',
+      is_staff: payload.isAdmin,
+      is_active: payload.isActive,
+    }),
+  });
+  return toAdminCoach(created);
+}
+
+export async function updateAdminCoach(
+  coachId: string,
+  patch: Partial<{ username: string; email: string; password: string; isAdmin: boolean; isActive: boolean }>,
+): Promise<AdminCoach> {
+  const body: Record<string, unknown> = {};
+  if (patch.username !== undefined) body.username = patch.username;
+  if (patch.email !== undefined) body.email = patch.email;
+  if (patch.password !== undefined) body.password = patch.password;
+  if (patch.isAdmin !== undefined) body.is_staff = patch.isAdmin;
+  if (patch.isActive !== undefined) body.is_active = patch.isActive;
+  const updated = await request<ApiCoach>(`/api/admin/coaches/${coachId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+  return toAdminCoach(updated);
+}
+
+export async function deleteAdminCoach(coachId: string): Promise<void> {
+  await request<void>(`/api/admin/coaches/${coachId}/`, { method: 'DELETE' });
+}
+
+export async function listAdminCoachees(): Promise<AdminCoachee[]> {
+  const items = await request<ApiCoachee[]>('/api/admin/coachees/');
+  return items.map(toAdminCoachee);
+}
+
+export async function createAdminCoachee(payload: { name: string; email?: string; notes?: string }): Promise<AdminCoachee> {
+  const created = await request<ApiCoachee>('/api/admin/coachees/', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return toAdminCoachee(created);
+}
+
+export async function updateAdminCoachee(
+  coacheeId: string,
+  patch: Partial<{ name: string; email: string; notes: string }>,
+): Promise<AdminCoachee> {
+  const updated = await request<ApiCoachee>(`/api/admin/coachees/${coacheeId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+  return toAdminCoachee(updated);
+}
+
+export async function deleteAdminCoachee(coacheeId: string): Promise<void> {
+  await request<void>(`/api/admin/coachees/${coacheeId}/`, { method: 'DELETE' });
 }
 
 // ---------------------------------------------------------------------------
