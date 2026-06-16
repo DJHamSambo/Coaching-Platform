@@ -1,4 +1,4 @@
-from django.db import migrations, models
+from django.db import migrations
 
 
 class Migration(migrations.Migration):
@@ -7,10 +7,6 @@ class Migration(migrations.Migration):
         ("api", "0001_initial"),
     ]
 
-    operations = [
-        migrations.AddField(
-            model_name="message",
-            name="task_id",
-            field=models.IntegerField(blank=True, null=True),
-        ),
-    ]
+    # `task_id` already exists in `0001_initial`; keep this migration as a no-op
+    # to preserve historical ordering without failing on fresh databases.
+    operations = []

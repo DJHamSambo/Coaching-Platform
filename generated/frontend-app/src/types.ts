@@ -92,3 +92,5 @@ export interface ResourceItem {
   category: 'guide' | 'worksheet' | 'link';
   scope: 'plan' | 'shared';
 }
+
+export type { CalendarSession, WeeklyAvailabilityWindow, UnavailablePeriod } from './types/calendarTypes';

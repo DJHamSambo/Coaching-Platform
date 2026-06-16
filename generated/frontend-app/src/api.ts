@@ -1,7 +1,22 @@
 // API client — talks to the Django backend at http://localhost:8000
 // All calls attach the stored JWT token automatically.
 
-import type { AdminCoachee, AdminCoach, Coachee, CoachingPlan, CurrentUser, DiscussionItem, PlanAction, PlanStatus, PlanTask, TaskStatus } from './types';
+import type {
+  AdminCoachee,
+  AdminCoach,
+  CalendarSession,
+  Coachee,
+  CoachingPlan,
+  CurrentUser,
+  DiscussionItem,
+  PlanAction,
+  PlanStatus,
+  PlanTask,
+  TaskStatus,
+  UnavailablePeriod,
+  WeeklyAvailabilityWindow,
+} from './types';
+import { GENERIC_API_ERROR_MESSAGE, SESSION_EXPIRED_MESSAGE } from './constants/messages';
 
 const BASE_URL = 'http://127.0.0.1:8000';
 const TOKEN_KEY = 'coaching_jwt';
@@ -29,6 +44,10 @@ export function getToken(): string | null {
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function setAuthTokens(tokens: AuthTokens): void {
+  localStorage.setItem(TOKEN_KEY, tokens.access);
 }
 
 export function clearToken(): void {
@@ -87,6 +106,17 @@ interface ApiMe {
   role: 'admin' | 'coach';
 }
 
+interface ApiListResponse<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
+function toListResults<T>(payload: T[] | ApiListResponse<T>): T[] {
+  return Array.isArray(payload) ? payload : payload.results;
+}
+
 export async function getMe(): Promise<CurrentUser> {
   const me = await request<ApiMe>('/api/auth/me/');
   return {
@@ -98,8 +128,62 @@ export async function getMe(): Promise<CurrentUser> {
   };
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+function getTokenExpEpochSeconds(token: string): number | null {
+  const payload = decodeJwtPayload(token);
+  const expValue = payload?.exp;
+  return typeof expValue === 'number' ? expValue : null;
+}
+
+function isTokenExpiredOrNearExpiry(token: string, skewSeconds = 30): boolean {
+  const exp = getTokenExpEpochSeconds(token);
+  if (!exp) return true;
+  const now = Math.floor(Date.now() / 1000);
+  return exp <= now + skewSeconds;
+}
+
+function notifyAuthExpired(): never {
+  clearToken();
+  window.dispatchEvent(new Event('auth:expired'));
+  throw new Error(SESSION_EXPIRED_MESSAGE);
+}
+
+async function ensureValidAccessToken(): Promise<string | null> {
   const token = getToken();
+  if (!token) return null;
+  if (!isTokenExpiredOrNearExpiry(token)) return token;
+
+  notifyAuthExpired();
+}
+
+async function parseClientSafeError(response: Response): Promise<string> {
+  if (response.status === 401) {
+    return SESSION_EXPIRED_MESSAGE;
+  }
+
+  let parsedMessage = '';
+  try {
+    const data = (await response.clone().json()) as { detail?: unknown; message?: unknown; error?: unknown };
+    const candidate = data.detail ?? data.message ?? data.error;
+    if (typeof candidate === 'string') {
+      parsedMessage = candidate;
+    }
+  } catch {
+    parsedMessage = '';
+  }
+
+  if (!parsedMessage) {
+    if (response.status >= 500) return 'Server error. Please try again later.';
+    if (response.status === 400) return 'Invalid request. Please review your input.';
+    if (response.status === 403) return 'You do not have permission to perform this action.';
+    if (response.status === 404) return 'Requested resource was not found.';
+    return GENERIC_API_ERROR_MESSAGE;
+  }
+
+  return `${response.status} ${parsedMessage}`;
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = await ensureValidAccessToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
@@ -107,9 +191,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+
   if (!response.ok) {
-    const text = await response.text().catch(() => response.statusText);
-    throw new Error(`${response.status} ${text}`);
+    if (response.status === 401) {
+      notifyAuthExpired();
+    }
+    const safeMessage = await parseClientSafeError(response);
+    throw new Error(safeMessage);
   }
   if (response.status === 204) return undefined as unknown as T;
   return response.json() as Promise<T>;
@@ -520,4 +608,174 @@ export async function updateAction(
     body: JSON.stringify(body),
   });
   return toPlanAction(updated, planId);
+}
+
+// ---------------------------------------------------------------------------
+// Calendar sessions + coach availability
+// ---------------------------------------------------------------------------
+
+interface ApiSession {
+  id: number;
+  title: string;
+  date: string;
+  duration_minutes: number;
+  coachee: number | null;
+  coachee_name: string;
+  notes: string;
+}
+
+function toCalendarSession(session: ApiSession): CalendarSession {
+  return {
+    id: String(session.id),
+    title: session.title,
+    date: session.date,
+    durationMinutes: session.duration_minutes,
+    coacheeId: session.coachee ? String(session.coachee) : null,
+    coacheeName: session.coachee_name ?? '',
+    notes: session.notes ?? '',
+  };
+}
+
+export async function listSessions(): Promise<CalendarSession[]> {
+  const sessions = await request<ApiSession[] | ApiListResponse<ApiSession>>('/api/sessions/');
+  return toListResults(sessions).map(toCalendarSession);
+}
+
+function toApiSessionPayload(payload: {
+  title?: string;
+  date?: string;
+  durationMinutes?: number;
+  coacheeId?: string;
+  notes?: string;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (payload.title !== undefined) body.title = payload.title;
+  if (payload.date !== undefined) body.date = payload.date;
+  if (payload.durationMinutes !== undefined) body.duration_minutes = payload.durationMinutes;
+  if (payload.coacheeId !== undefined) body.coachee = Number(payload.coacheeId);
+  if (payload.notes !== undefined) body.notes = payload.notes;
+  return body;
+}
+
+export async function createSession(payload: {
+  title: string;
+  date: string;
+  durationMinutes: number;
+  coacheeId: string;
+  notes?: string;
+}): Promise<CalendarSession> {
+  const created = await request<ApiSession>('/api/sessions/', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...toApiSessionPayload(payload),
+      requested_by: 'coach',
+      mode: 'video',
+    }),
+  });
+  return toCalendarSession(created);
+}
+
+export async function updateSession(
+  sessionId: string,
+  patch: Partial<{ title: string; date: string; durationMinutes: number; coacheeId: string; notes: string }>,
+): Promise<CalendarSession> {
+  const body = toApiSessionPayload(patch);
+  const updated = await request<ApiSession>(`/api/sessions/${sessionId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+  return toCalendarSession(updated);
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  await request<void>(`/api/sessions/${sessionId}/`, { method: 'DELETE' });
+}
+
+interface ApiWeeklyAvailabilityWindow {
+  id: number;
+  weekday: number;
+  start_time: string;
+  end_time: string;
+}
+
+function toAvailabilityWindow(window: ApiWeeklyAvailabilityWindow): WeeklyAvailabilityWindow {
+  return {
+    id: String(window.id),
+    weekday: window.weekday,
+    startTime: window.start_time,
+    endTime: window.end_time,
+  };
+}
+
+export async function listAvailabilityWindows(): Promise<WeeklyAvailabilityWindow[]> {
+  const windows = await request<ApiWeeklyAvailabilityWindow[] | ApiListResponse<ApiWeeklyAvailabilityWindow>>('/api/availability/windows/');
+  return toListResults(windows).map(toAvailabilityWindow);
+}
+
+export async function createAvailabilityWindow(payload: { weekday: number; startTime: string; endTime: string }): Promise<WeeklyAvailabilityWindow> {
+  const created = await request<ApiWeeklyAvailabilityWindow>('/api/availability/windows/', {
+    method: 'POST',
+    body: JSON.stringify({
+      weekday: payload.weekday,
+      start_time: payload.startTime,
+      end_time: payload.endTime,
+    }),
+  });
+  return toAvailabilityWindow(created);
+}
+
+export async function deleteAvailabilityWindow(windowId: string): Promise<void> {
+  await request<void>(`/api/availability/windows/${windowId}/`, { method: 'DELETE' });
+}
+
+interface ApiUnavailablePeriod {
+  id: number;
+  start_at: string;
+  end_at: string;
+  reason: string;
+}
+
+function toUnavailablePeriod(period: ApiUnavailablePeriod): UnavailablePeriod {
+  return {
+    id: String(period.id),
+    startAt: period.start_at,
+    endAt: period.end_at,
+    reason: period.reason,
+  };
+}
+
+export async function listUnavailablePeriods(): Promise<UnavailablePeriod[]> {
+  const periods = await request<ApiUnavailablePeriod[] | ApiListResponse<ApiUnavailablePeriod>>('/api/availability/unavailable/');
+  return toListResults(periods).map(toUnavailablePeriod);
+}
+
+export async function createUnavailablePeriod(payload: { startAt: string; endAt: string; reason?: string }): Promise<UnavailablePeriod> {
+  const created = await request<ApiUnavailablePeriod>('/api/availability/unavailable/', {
+    method: 'POST',
+    body: JSON.stringify({
+      start_at: payload.startAt,
+      end_at: payload.endAt,
+      reason: payload.reason ?? '',
+    }),
+  });
+  return toUnavailablePeriod(created);
+}
+
+export async function updateUnavailablePeriod(
+  periodId: string,
+  patch: Partial<{ startAt: string; endAt: string; reason: string }>,
+): Promise<UnavailablePeriod> {
+  const body: Record<string, unknown> = {};
+  if (patch.startAt !== undefined) body.start_at = patch.startAt;
+  if (patch.endAt !== undefined) body.end_at = patch.endAt;
+  if (patch.reason !== undefined) body.reason = patch.reason;
+  const updated = await request<ApiUnavailablePeriod>(`/api/availability/unavailable/${periodId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+  return toUnavailablePeriod(updated);
+}
+
+export async function deleteUnavailablePeriod(periodId: string): Promise<void> {
+  await request<void>(`/api/availability/unavailable/${periodId}/`, { method: 'DELETE' });
 }

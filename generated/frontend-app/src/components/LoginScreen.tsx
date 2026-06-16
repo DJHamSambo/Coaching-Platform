@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { clearToken, login, register, setCurrentUsername, setToken } from '../api';
+import { login, register, setAuthTokens, setCurrentUsername } from '../api';
 
 interface LoginScreenProps {
   onAuthenticated: (username: string) => void;
@@ -22,9 +22,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
         await register({ username, password, email });
       }
       const tokens = await login({ username, password });
-      setToken(tokens.access);
-      clearToken(); // clear any stale state
-      setToken(tokens.access);
+      setAuthTokens(tokens);
       setCurrentUsername(username);
       onAuthenticated(username);
     } catch (err) {
