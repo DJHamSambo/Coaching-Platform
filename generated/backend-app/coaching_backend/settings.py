@@ -45,4 +45,7 @@ REST_FRAMEWORK = {
     ],
 }
 
+CALENDAR_PAGE_SIZE = 100
+CALENDAR_MAX_PAGE_SIZE = 500
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

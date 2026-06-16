@@ -8,7 +8,14 @@ from api.tasks_views import TasksListView, TasksDetailView
 from api.messages_views import MessagesListView, MessagesDetailView
 from api.coachees_views import CoacheesListView, CoacheesDetailView
 from api.plans_views import PlansListView, PlansDetailView, PlanActionsListView, PlanActionsDetailView
-from api.sessions_views import SessionsListView, SessionsDetailView, WeeklyAvailabilityWindowListView, WeeklyAvailabilityWindowDetailView, UnavailablePeriodListView, UnavailablePeriodDetailView
+from api.sessions_views import (
+    SessionsListView,
+    SessionsDetailView,
+    WeeklyAvailabilityWindowListView,
+    WeeklyAvailabilityWindowDetailView,
+    UnavailablePeriodListView,
+    UnavailablePeriodDetailView,
+)
 
 urlpatterns = [
     path("api/auth/register/", register, name="register"),

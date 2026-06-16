@@ -1,21 +1,14 @@
+from django.conf import settings
 from rest_framework import generics, permissions, pagination
 from api.sessions_serializers import SessionsSerializer, WeeklyAvailabilityWindowSerializer, UnavailablePeriodSerializer
 from api.models import Session, WeeklyAvailabilityWindow, UnavailablePeriod
+from api.permissions import OwnsObjectPermission
 
 
 class CalendarPageNumberPagination(pagination.PageNumberPagination):
-    page_size = 100
+    page_size = getattr(settings, "CALENDAR_PAGE_SIZE", 100)
     page_size_query_param = "page_size"
-    max_page_size = 500
-
-
-class OwnsObjectPermission(permissions.BasePermission):
-    def has_object_permission(self, request, view, obj):
-        if hasattr(obj, "owner"):
-            return obj.owner_id == request.user.id
-        if hasattr(obj, "coach"):
-            return obj.coach_id == request.user.id
-        return False
+    max_page_size = getattr(settings, "CALENDAR_MAX_PAGE_SIZE", 500)
 
 
 class CoachOwnedListCreateView(generics.ListCreateAPIView):

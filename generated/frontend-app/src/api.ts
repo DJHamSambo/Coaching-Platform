@@ -20,9 +20,7 @@ import { GENERIC_API_ERROR_MESSAGE, SESSION_EXPIRED_MESSAGE } from './constants/
 
 const BASE_URL = 'http://127.0.0.1:8000';
 const TOKEN_KEY = 'coaching_jwt';
-const REFRESH_TOKEN_KEY = 'coaching_refresh_jwt';
 const USERNAME_KEY = 'coaching_username';
-let refreshInFlight: Promise<string | null> | null = null;
 
 export interface AuthTokens {
   access: string;
@@ -50,16 +48,10 @@ export function setToken(token: string): void {
 
 export function setAuthTokens(tokens: AuthTokens): void {
   localStorage.setItem(TOKEN_KEY, tokens.access);
-  localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh);
-}
-
-function getRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(USERNAME_KEY);
 }
 
@@ -149,41 +141,6 @@ function isTokenExpiredOrNearExpiry(token: string, skewSeconds = 30): boolean {
   return exp <= now + skewSeconds;
 }
 
-async function refreshAccessToken(): Promise<string | null> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return null;
-
-  if (!refreshInFlight) {
-    refreshInFlight = (async () => {
-      try {
-        const response = await fetch(`${BASE_URL}/api/auth/refresh/`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh: refreshToken }),
-        });
-
-        if (!response.ok) {
-          return null;
-        }
-
-        const data = (await response.json()) as { access?: string };
-        if (typeof data.access !== 'string' || !data.access) {
-          return null;
-        }
-
-        setToken(data.access);
-        return data.access;
-      } catch {
-        return null;
-      } finally {
-        refreshInFlight = null;
-      }
-    })();
-  }
-
-  return refreshInFlight;
-}
-
 function notifyAuthExpired(): never {
   clearToken();
   window.dispatchEvent(new Event('auth:expired'));
@@ -195,11 +152,7 @@ async function ensureValidAccessToken(): Promise<string | null> {
   if (!token) return null;
   if (!isTokenExpiredOrNearExpiry(token)) return token;
 
-  const refreshed = await refreshAccessToken();
-  if (!refreshed) {
-    notifyAuthExpired();
-  }
-  return refreshed;
+  notifyAuthExpired();
 }
 
 async function parseClientSafeError(response: Response): Promise<string> {
@@ -237,19 +190,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  let response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-  if (response.status === 401 && getRefreshToken()) {
-    const refreshed = await refreshAccessToken();
-    if (!refreshed) {
-      notifyAuthExpired();
-    }
-
-    const retryHeaders: Record<string, string> = {
-      ...headers,
-      Authorization: `Bearer ${refreshed}`,
-    };
-    response = await fetch(`${BASE_URL}${path}`, { ...options, headers: retryHeaders });
-  }
+  const response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
 
   if (!response.ok) {
     if (response.status === 401) {

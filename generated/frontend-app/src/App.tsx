@@ -9,9 +9,11 @@ import { SESSION_EXPIRED_MESSAGE } from './constants/messages';
 import { requirementTitle } from './data/seed';
 import type { AdminCoachee, AdminCoach, CoachingPlan, CurrentUser } from './types';
 
+const CALENDAR_FEATURE_ENABLED = import.meta.env.VITE_ENABLE_CALENDAR !== 'false';
+
 const MODULES = [
   { key: 'plans', label: 'Coaching Plans', enabled: true },
-  { key: 'calendar', label: 'Calendar', enabled: true },
+  { key: 'calendar', label: 'Calendar', enabled: CALENDAR_FEATURE_ENABLED },
   { key: 'administration', label: 'Administration', enabled: true },
 ] as const;
 

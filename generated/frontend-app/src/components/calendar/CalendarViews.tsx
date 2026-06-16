@@ -1,5 +1,6 @@
 import type { CalendarSession, UnavailablePeriod } from '../../types';
 import { formatHourLabel, toDateKey, WEEKDAY_LABELS } from './calendarUtils';
+import { sanitizeInput } from '../adminFormUtils';
 
 interface DayCell {
   date: Date;
@@ -20,6 +21,49 @@ interface MonthCalendarViewProps {
   onCreateSession: (day: Date) => void;
   onEditSession: (session: CalendarSession) => void;
   onEditUnavailable: (period: UnavailablePeriod) => void;
+}
+
+function toSafeTitle(value: string): string {
+  return sanitizeInput(value, 255);
+}
+
+function SessionEntryButton({ session, onEditSession }: { session: CalendarSession; onEditSession: (session: CalendarSession) => void }) {
+  const safeTitle = toSafeTitle(session.title || 'session');
+  return (
+    <button
+      type='button'
+      key={session.id}
+      className='calendar-event'
+      onClick={() => onEditSession(session)}
+      title={`Edit ${safeTitle}`}
+    >
+      <span>{new Date(session.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+      <strong>{session.coacheeName || 'Coachee'}</strong>
+    </button>
+  );
+}
+
+function UnavailableEntryButton({
+  period,
+  dayKey,
+  onEditUnavailable,
+}: {
+  period: UnavailablePeriod;
+  dayKey: string;
+  onEditUnavailable: (period: UnavailablePeriod) => void;
+}) {
+  const safeReason = toSafeTitle(period.reason || 'Unavailable');
+  return (
+    <button
+      type='button'
+      key={`${dayKey}-unavailable-${period.id}`}
+      className='calendar-unavailable'
+      title={`Edit ${safeReason}`}
+      onClick={() => onEditUnavailable(period)}
+    >
+      {safeReason.trim() ? safeReason : 'Unavailable'}
+    </button>
+  );
 }
 
 export function MonthCalendarView({
@@ -51,27 +95,15 @@ export function MonthCalendarView({
               </div>
               <div className='calendar-events'>
                 {dayUnavailable.map((period) => (
-                  <button
-                    type='button'
+                  <UnavailableEntryButton
                     key={`${key}-unavailable-${period.id}`}
-                    className='calendar-unavailable'
-                    title='Edit unavailable period'
-                    onClick={() => onEditUnavailable(period)}
-                  >
-                    {period.reason?.trim() ? period.reason : 'Unavailable'}
-                  </button>
+                    period={period}
+                    dayKey={key}
+                    onEditUnavailable={onEditUnavailable}
+                  />
                 ))}
                 {daySessions.map((session) => (
-                  <button
-                    type='button'
-                    key={session.id}
-                    className='calendar-event'
-                    onClick={() => onEditSession(session)}
-                    title={`Edit ${session.title}`}
-                  >
-                    <span>{new Date(session.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    <strong>{session.coacheeName || 'Coachee'}</strong>
-                  </button>
+                  <SessionEntryButton key={session.id} session={session} onEditSession={onEditSession} />
                 ))}
               </div>
             </div>
@@ -127,23 +159,27 @@ export function WeekCalendarView({
               const dayUnavailable = weekUnavailableByHour.get(`${dayKey}|${hour}`) ?? [];
               return (
                 <div key={`${dayKey}-${hour}`} className='week-slot'>
-                  {dayUnavailable.map((period) => (
-                    <button
-                      type='button'
-                      key={`unavailable-${period.id}-${hour}`}
-                      className='calendar-unavailable week-entry'
-                      onClick={() => onEditUnavailable(period)}
-                    >
-                      {period.reason?.trim() ? period.reason : 'Unavailable'}
-                    </button>
-                  ))}
+                  {dayUnavailable.map((period) => {
+                    const safeReason = toSafeTitle(period.reason || 'Unavailable');
+                    return (
+                      <button
+                        type='button'
+                        key={`unavailable-${period.id}-${hour}`}
+                        className='calendar-unavailable week-entry'
+                        onClick={() => onEditUnavailable(period)}
+                        title={`Edit ${safeReason}`}
+                      >
+                        {safeReason.trim() ? safeReason : 'Unavailable'}
+                      </button>
+                    );
+                  })}
                   {daySessions.map((session) => (
                     <button
                       type='button'
                       key={`session-${session.id}-${hour}`}
                       className='calendar-event week-entry'
                       onClick={() => onEditSession(session)}
-                      title={`Edit ${session.title}`}
+                      title={`Edit ${toSafeTitle(session.title || 'session')}`}
                     >
                       <strong>{session.coacheeName || 'Coachee'}</strong>
                       <span>{new Date(session.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>

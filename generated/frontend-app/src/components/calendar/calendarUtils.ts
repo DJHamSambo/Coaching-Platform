@@ -1,4 +1,9 @@
-export const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+export const WEEKDAY_LABELS = Array.from({ length: 7 }, (_, dayOffset) => {
+  const mondayFirstDate = new Date(Date.UTC(2024, 0, dayOffset + 1));
+  return new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(mondayFirstDate);
+});
+
+const ISO_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})?$/;
 
 export function toDateInputValue(value: Date): string {
   const year = value.getFullYear();
@@ -10,6 +15,10 @@ export function toDateInputValue(value: Date): string {
 }
 
 export function toLocalDateTimeInputValue(dateText: string): string {
+  if (!ISO_DATE_TIME_PATTERN.test(dateText)) {
+    return dateText.slice(0, 16);
+  }
+
   const parsed = new Date(dateText);
   if (Number.isNaN(parsed.getTime())) {
     return dateText.slice(0, 16);
