@@ -8,6 +8,14 @@ from api.tasks_views import TasksListView, TasksDetailView
 from api.messages_views import MessagesListView, MessagesDetailView
 from api.coachees_views import CoacheesListView, CoacheesDetailView
 from api.plans_views import PlansListView, PlansDetailView, PlanActionsListView, PlanActionsDetailView
+from api.sessions_views import (
+    SessionsListView,
+    SessionsDetailView,
+    WeeklyAvailabilityWindowListView,
+    WeeklyAvailabilityWindowDetailView,
+    UnavailablePeriodListView,
+    UnavailablePeriodDetailView,
+)
 
 urlpatterns = [
     path("api/auth/register/", register, name="register"),
@@ -33,6 +41,13 @@ urlpatterns = [
     # Plan-scoped actions (sequenced)
     path("api/plans/<int:plan_id>/actions/", PlanActionsListView.as_view(), name="plan-actions-list"),
     path("api/plans/<int:plan_id>/actions/<int:pk>/", PlanActionsDetailView.as_view(), name="plan-actions-detail"),
+    # Calendar sessions and coach availability
+    path("api/sessions/", SessionsListView.as_view(), name="sessions-list"),
+    path("api/sessions/<int:pk>/", SessionsDetailView.as_view(), name="sessions-detail"),
+    path("api/availability/windows/", WeeklyAvailabilityWindowListView.as_view(), name="availability-windows-list"),
+    path("api/availability/windows/<int:pk>/", WeeklyAvailabilityWindowDetailView.as_view(), name="availability-windows-detail"),
+    path("api/availability/unavailable/", UnavailablePeriodListView.as_view(), name="unavailable-periods-list"),
+    path("api/availability/unavailable/<int:pk>/", UnavailablePeriodDetailView.as_view(), name="unavailable-periods-detail"),
     # Legacy flat task/message endpoints (kept for backwards compatibility)
     path("api/tasks/", TasksListView.as_view(), name="tasks-list"),
     path("api/tasks/<int:pk>/", TasksDetailView.as_view(), name="tasks-detail"),

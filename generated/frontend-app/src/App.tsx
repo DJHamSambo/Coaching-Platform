@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PlanList } from './components/PlanList';
 import { PlanDetail } from './components/PlanDetail';
+import { CalendarPanel } from './components/CalendarPanel';
 import { AdministrationPanel } from './components/AdministrationPanel';
 import { LoginScreen } from './components/LoginScreen';
 import { clearToken, createPlan, getMe, getToken, listAdminCoachees, listCoachDirectory, listPlans } from './api';
@@ -9,6 +10,7 @@ import type { AdminCoachee, AdminCoach, CoachingPlan, CurrentUser } from './type
 
 const MODULES = [
   { key: 'plans', label: 'Coaching Plans', enabled: true },
+  { key: 'calendar', label: 'Calendar', enabled: true },
   { key: 'administration', label: 'Administration', enabled: true },
 ] as const;
 
@@ -60,6 +62,21 @@ export default function App() {
 
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleAuthExpired(): void {
+      clearToken();
+      setCurrentUser(null);
+      setSelectedPlan(null);
+      setActiveModule('plans');
+      setPlansError('Your session expired. Please sign in again.');
+    }
+
+    window.addEventListener('auth:expired', handleAuthExpired);
+    return () => {
+      window.removeEventListener('auth:expired', handleAuthExpired);
     };
   }, []);
 
@@ -203,6 +220,8 @@ export default function App() {
             onPlanUpdated={handlePlanUpdated}
           />
         )}
+
+        {activeModule === 'calendar' && <CalendarPanel coachees={coachees} />}
 
         {activeModule === 'administration' && <AdministrationPanel currentUser={currentUser} />}
       </section>

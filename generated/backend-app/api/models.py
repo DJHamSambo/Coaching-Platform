@@ -81,11 +81,48 @@ class Session(models.Model):
     MODE_CHOICES = [("video", "Video"), ("in-person", "In Person"), ("phone", "Phone")]
     title = models.CharField(max_length=255)
     date = models.DateTimeField(null=True, blank=True)
+    duration_minutes = models.PositiveIntegerField(default=60)
+    coachee = models.ForeignKey(Coachee, on_delete=models.SET_NULL, null=True, blank=True, related_name="sessions")
+    notes = models.TextField(blank=True, default="")
     mode = models.CharField(max_length=20, choices=MODE_CHOICES, default="video")
     requested_by = models.CharField(max_length=100, default="coachee")
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sessions")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class WeeklyAvailabilityWindow(models.Model):
+    WEEKDAY_CHOICES = [
+        (0, "Monday"),
+        (1, "Tuesday"),
+        (2, "Wednesday"),
+        (3, "Thursday"),
+        (4, "Friday"),
+        (5, "Saturday"),
+        (6, "Sunday"),
+    ]
+
+    coach = models.ForeignKey(User, on_delete=models.CASCADE, related_name="weekly_availability_windows")
+    weekday = models.PositiveSmallIntegerField(choices=WEEKDAY_CHOICES)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["weekday", "start_time"]
+
+
+class UnavailablePeriod(models.Model):
+    coach = models.ForeignKey(User, on_delete=models.CASCADE, related_name="unavailable_periods")
+    start_at = models.DateTimeField()
+    end_at = models.DateTimeField()
+    reason = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["start_at"]
 
 
 class Insight(models.Model):
