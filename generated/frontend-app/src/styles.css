@@ -5,6 +5,9 @@
   --accent: #0b766e;
   --muted: #5d7472;
   --line: #d3e1df;
+  --modal-card-padding: 16px;
+  --modal-card-radius: 14px;
+  --modal-card-shadow: 0 22px 48px rgba(15, 23, 42, 0.32);
 }
 
 .kanban {
@@ -169,9 +172,9 @@ button.primary {
   position: relative;
   background: #ffffff;
   border: 2px solid #0b766e;
-  border-radius: 14px;
-  box-shadow: 0 22px 48px rgba(15, 23, 42, 0.32);
-  padding: 16px;
+  border-radius: var(--modal-card-radius);
+  box-shadow: var(--modal-card-shadow);
+  padding: var(--modal-card-padding);
 }
 
 .admin-panel-modal-close {

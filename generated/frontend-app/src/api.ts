@@ -16,10 +16,13 @@ import type {
   UnavailablePeriod,
   WeeklyAvailabilityWindow,
 } from './types';
+import { GENERIC_API_ERROR_MESSAGE, SESSION_EXPIRED_MESSAGE } from './constants/messages';
 
 const BASE_URL = 'http://127.0.0.1:8000';
 const TOKEN_KEY = 'coaching_jwt';
+const REFRESH_TOKEN_KEY = 'coaching_refresh_jwt';
 const USERNAME_KEY = 'coaching_username';
+let refreshInFlight: Promise<string | null> | null = null;
 
 export interface AuthTokens {
   access: string;
@@ -45,8 +48,18 @@ export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token);
 }
 
+export function setAuthTokens(tokens: AuthTokens): void {
+  localStorage.setItem(TOKEN_KEY, tokens.access);
+  localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh);
+}
+
+function getRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(USERNAME_KEY);
 }
 
@@ -101,6 +114,17 @@ interface ApiMe {
   role: 'admin' | 'coach';
 }
 
+interface ApiListResponse<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
+function toListResults<T>(payload: T[] | ApiListResponse<T>): T[] {
+  return Array.isArray(payload) ? payload : payload.results;
+}
+
 export async function getMe(): Promise<CurrentUser> {
   const me = await request<ApiMe>('/api/auth/me/');
   return {
@@ -112,23 +136,127 @@ export async function getMe(): Promise<CurrentUser> {
   };
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+function getTokenExpEpochSeconds(token: string): number | null {
+  const payload = decodeJwtPayload(token);
+  const expValue = payload?.exp;
+  return typeof expValue === 'number' ? expValue : null;
+}
+
+function isTokenExpiredOrNearExpiry(token: string, skewSeconds = 30): boolean {
+  const exp = getTokenExpEpochSeconds(token);
+  if (!exp) return true;
+  const now = Math.floor(Date.now() / 1000);
+  return exp <= now + skewSeconds;
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        const response = await fetch(`${BASE_URL}/api/auth/refresh/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh: refreshToken }),
+        });
+
+        if (!response.ok) {
+          return null;
+        }
+
+        const data = (await response.json()) as { access?: string };
+        if (typeof data.access !== 'string' || !data.access) {
+          return null;
+        }
+
+        setToken(data.access);
+        return data.access;
+      } catch {
+        return null;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
+
+  return refreshInFlight;
+}
+
+function notifyAuthExpired(): never {
+  clearToken();
+  window.dispatchEvent(new Event('auth:expired'));
+  throw new Error(SESSION_EXPIRED_MESSAGE);
+}
+
+async function ensureValidAccessToken(): Promise<string | null> {
   const token = getToken();
+  if (!token) return null;
+  if (!isTokenExpiredOrNearExpiry(token)) return token;
+
+  const refreshed = await refreshAccessToken();
+  if (!refreshed) {
+    notifyAuthExpired();
+  }
+  return refreshed;
+}
+
+async function parseClientSafeError(response: Response): Promise<string> {
+  if (response.status === 401) {
+    return SESSION_EXPIRED_MESSAGE;
+  }
+
+  let parsedMessage = '';
+  try {
+    const data = (await response.clone().json()) as { detail?: unknown; message?: unknown; error?: unknown };
+    const candidate = data.detail ?? data.message ?? data.error;
+    if (typeof candidate === 'string') {
+      parsedMessage = candidate;
+    }
+  } catch {
+    parsedMessage = '';
+  }
+
+  if (!parsedMessage) {
+    if (response.status >= 500) return 'Server error. Please try again later.';
+    if (response.status === 400) return 'Invalid request. Please review your input.';
+    if (response.status === 403) return 'You do not have permission to perform this action.';
+    if (response.status === 404) return 'Requested resource was not found.';
+    return GENERIC_API_ERROR_MESSAGE;
+  }
+
+  return `${response.status} ${parsedMessage}`;
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = await ensureValidAccessToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  let response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+  if (response.status === 401 && getRefreshToken()) {
+    const refreshed = await refreshAccessToken();
+    if (!refreshed) {
+      notifyAuthExpired();
+    }
+
+    const retryHeaders: Record<string, string> = {
+      ...headers,
+      Authorization: `Bearer ${refreshed}`,
+    };
+    response = await fetch(`${BASE_URL}${path}`, { ...options, headers: retryHeaders });
+  }
+
   if (!response.ok) {
     if (response.status === 401) {
-      clearToken();
-      window.dispatchEvent(new Event('auth:expired'));
-      throw new Error('Your session expired. Please sign in again.');
+      notifyAuthExpired();
     }
-    const text = await response.text().catch(() => response.statusText);
-    throw new Error(`${response.status} ${text}`);
+    const safeMessage = await parseClientSafeError(response);
+    throw new Error(safeMessage);
   }
   if (response.status === 204) return undefined as unknown as T;
   return response.json() as Promise<T>;
@@ -568,8 +696,24 @@ function toCalendarSession(session: ApiSession): CalendarSession {
 }
 
 export async function listSessions(): Promise<CalendarSession[]> {
-  const sessions = await request<ApiSession[]>('/api/sessions/');
-  return sessions.map(toCalendarSession);
+  const sessions = await request<ApiSession[] | ApiListResponse<ApiSession>>('/api/sessions/');
+  return toListResults(sessions).map(toCalendarSession);
+}
+
+function toApiSessionPayload(payload: {
+  title?: string;
+  date?: string;
+  durationMinutes?: number;
+  coacheeId?: string;
+  notes?: string;
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (payload.title !== undefined) body.title = payload.title;
+  if (payload.date !== undefined) body.date = payload.date;
+  if (payload.durationMinutes !== undefined) body.duration_minutes = payload.durationMinutes;
+  if (payload.coacheeId !== undefined) body.coachee = Number(payload.coacheeId);
+  if (payload.notes !== undefined) body.notes = payload.notes;
+  return body;
 }
 
 export async function createSession(payload: {
@@ -582,11 +726,7 @@ export async function createSession(payload: {
   const created = await request<ApiSession>('/api/sessions/', {
     method: 'POST',
     body: JSON.stringify({
-      title: payload.title,
-      date: payload.date,
-      duration_minutes: payload.durationMinutes,
-      coachee: Number(payload.coacheeId),
-      notes: payload.notes ?? '',
+      ...toApiSessionPayload(payload),
       requested_by: 'coach',
       mode: 'video',
     }),
@@ -598,12 +738,7 @@ export async function updateSession(
   sessionId: string,
   patch: Partial<{ title: string; date: string; durationMinutes: number; coacheeId: string; notes: string }>,
 ): Promise<CalendarSession> {
-  const body: Record<string, unknown> = {};
-  if (patch.title !== undefined) body.title = patch.title;
-  if (patch.date !== undefined) body.date = patch.date;
-  if (patch.durationMinutes !== undefined) body.duration_minutes = patch.durationMinutes;
-  if (patch.coacheeId !== undefined) body.coachee = Number(patch.coacheeId);
-  if (patch.notes !== undefined) body.notes = patch.notes;
+  const body = toApiSessionPayload(patch);
   const updated = await request<ApiSession>(`/api/sessions/${sessionId}/`, {
     method: 'PATCH',
     body: JSON.stringify(body),
@@ -632,8 +767,8 @@ function toAvailabilityWindow(window: ApiWeeklyAvailabilityWindow): WeeklyAvaila
 }
 
 export async function listAvailabilityWindows(): Promise<WeeklyAvailabilityWindow[]> {
-  const windows = await request<ApiWeeklyAvailabilityWindow[]>('/api/availability/windows/');
-  return windows.map(toAvailabilityWindow);
+  const windows = await request<ApiWeeklyAvailabilityWindow[] | ApiListResponse<ApiWeeklyAvailabilityWindow>>('/api/availability/windows/');
+  return toListResults(windows).map(toAvailabilityWindow);
 }
 
 export async function createAvailabilityWindow(payload: { weekday: number; startTime: string; endTime: string }): Promise<WeeklyAvailabilityWindow> {
@@ -669,8 +804,8 @@ function toUnavailablePeriod(period: ApiUnavailablePeriod): UnavailablePeriod {
 }
 
 export async function listUnavailablePeriods(): Promise<UnavailablePeriod[]> {
-  const periods = await request<ApiUnavailablePeriod[]>('/api/availability/unavailable/');
-  return periods.map(toUnavailablePeriod);
+  const periods = await request<ApiUnavailablePeriod[] | ApiListResponse<ApiUnavailablePeriod>>('/api/availability/unavailable/');
+  return toListResults(periods).map(toUnavailablePeriod);
 }
 
 export async function createUnavailablePeriod(payload: { startAt: string; endAt: string; reason?: string }): Promise<UnavailablePeriod> {

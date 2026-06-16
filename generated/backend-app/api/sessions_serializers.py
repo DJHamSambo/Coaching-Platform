@@ -1,5 +1,24 @@
 from rest_framework import serializers
+from django.db.models import Q
 from api.models import Session, WeeklyAvailabilityWindow, UnavailablePeriod
+
+
+def _validate_ordered_range(start_value, end_value, start_label: str, end_label: str):
+    if start_value and end_value and start_value >= end_value:
+        raise serializers.ValidationError(f"{start_label} must be earlier than {end_label}")
+
+
+def _resolve_actor(serializer: serializers.Serializer):
+    request = serializer.context.get("request")
+    if request and getattr(request, "user", None) and request.user.is_authenticated:
+        return request.user
+    instance = getattr(serializer, "instance", None)
+    if instance is not None:
+        if hasattr(instance, "coach"):
+            return instance.coach
+        if hasattr(instance, "owner"):
+            return instance.owner
+    return None
 
 
 class SessionsSerializer(serializers.ModelSerializer):
@@ -36,8 +55,19 @@ class WeeklyAvailabilityWindowSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         start_time = attrs.get("start_time", getattr(self.instance, "start_time", None))
         end_time = attrs.get("end_time", getattr(self.instance, "end_time", None))
-        if start_time and end_time and start_time >= end_time:
-            raise serializers.ValidationError("start_time must be earlier than end_time")
+        weekday = attrs.get("weekday", getattr(self.instance, "weekday", None))
+        coach = _resolve_actor(self)
+
+        _validate_ordered_range(start_time, end_time, "start_time", "end_time")
+
+        if coach and weekday is not None and start_time and end_time:
+            queryset = WeeklyAvailabilityWindow.objects.filter(coach=coach, weekday=weekday)
+            if self.instance is not None:
+                queryset = queryset.exclude(pk=self.instance.pk)
+            overlaps = queryset.filter(start_time__lt=end_time, end_time__gt=start_time).exists()
+            if overlaps:
+                raise serializers.ValidationError("Availability window overlaps an existing entry.")
+
         return attrs
 
 
@@ -50,6 +80,16 @@ class UnavailablePeriodSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         start_at = attrs.get("start_at", getattr(self.instance, "start_at", None))
         end_at = attrs.get("end_at", getattr(self.instance, "end_at", None))
-        if start_at and end_at and start_at >= end_at:
-            raise serializers.ValidationError("start_at must be earlier than end_at")
+        coach = _resolve_actor(self)
+
+        _validate_ordered_range(start_at, end_at, "start_at", "end_at")
+
+        if coach and start_at and end_at:
+            queryset = UnavailablePeriod.objects.filter(coach=coach)
+            if self.instance is not None:
+                queryset = queryset.exclude(pk=self.instance.pk)
+            overlaps = queryset.filter(Q(start_at__lt=end_at) & Q(end_at__gt=start_at)).exists()
+            if overlaps:
+                raise serializers.ValidationError("Unavailable period overlaps an existing entry.")
+
         return attrs

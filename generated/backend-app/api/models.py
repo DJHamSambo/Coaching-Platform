@@ -82,7 +82,7 @@ class Session(models.Model):
     title = models.CharField(max_length=255)
     date = models.DateTimeField(null=True, blank=True)
     duration_minutes = models.PositiveIntegerField(default=60)
-    coachee = models.ForeignKey(Coachee, on_delete=models.SET_NULL, null=True, blank=True, related_name="sessions")
+    coachee = models.ForeignKey(Coachee, on_delete=models.SET_NULL, null=True, blank=True, related_name="coachee_sessions")
     notes = models.TextField(blank=True, default="")
     mode = models.CharField(max_length=20, choices=MODE_CHOICES, default="video")
     requested_by = models.CharField(max_length=100, default="coachee")
@@ -111,6 +111,7 @@ class WeeklyAvailabilityWindow(models.Model):
 
     class Meta:
         ordering = ["weekday", "start_time"]
+        indexes = [models.Index(fields=["coach", "weekday", "start_time"])]
 
 
 class UnavailablePeriod(models.Model):
@@ -123,6 +124,7 @@ class UnavailablePeriod(models.Model):
 
     class Meta:
         ordering = ["start_at"]
+        indexes = [models.Index(fields=["coach", "start_at", "end_at"])]
 
 
 class Insight(models.Model):

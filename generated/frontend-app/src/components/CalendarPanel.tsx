@@ -13,8 +13,9 @@ import {
   updateSession,
 } from '../api';
 import type { AdminCoachee, CalendarSession, UnavailablePeriod, WeeklyAvailabilityWindow } from '../types';
+import { MonthCalendarView, WeekCalendarView, YearCalendarView } from './calendar/CalendarViews';
+import { formatHourLabel, toDateInputValue, toDateKey, toLocalDateTimeInputValue, WEEKDAY_LABELS } from './calendar/calendarUtils';
 
-const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 type CalendarViewMode = 'month' | 'week' | 'year';
 const WEEK_START_STORAGE_KEY = 'calendar_week_start_hour';
 const WEEK_END_STORAGE_KEY = 'calendar_week_end_hour';
@@ -66,33 +67,6 @@ function createDefaultUnavailableForm(): UnavailableFormState {
     endAt: toDateInputValue(end),
     reason: '',
   };
-}
-
-function toDateInputValue(value: Date): string {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, '0');
-  const day = String(value.getDate()).padStart(2, '0');
-  const hours = String(value.getHours()).padStart(2, '0');
-  const minutes = String(value.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
-function toLocalDateTimeInputValue(dateText: string): string {
-  const parsed = new Date(dateText);
-  if (Number.isNaN(parsed.getTime())) {
-    return dateText.slice(0, 16);
-  }
-  return toDateInputValue(parsed);
-}
-
-function toDateKey(value: Date): string {
-  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
-}
-
-function formatHourLabel(hour: number): string {
-  const suffix = hour >= 12 ? 'PM' : 'AM';
-  const normalized = hour % 12 === 0 ? 12 : hour % 12;
-  return `${normalized}:00 ${suffix}`;
 }
 
 function getStoredHour(key: string, fallback: number): number {
@@ -626,127 +600,33 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
         ) : (
           <>
             {viewMode === 'month' ? (
-              <>
-                <div className='calendar-weekdays'>
-                  {WEEKDAY_LABELS.map((label) => (
-                    <div key={label} className='calendar-weekday'>{label}</div>
-                  ))}
-                </div>
-
-                <div className='calendar-grid'>
-                  {calendarDays.map(({ date, inCurrentMonth }) => {
-                    const key = date.toISOString().slice(0, 10);
-                    const daySessions = sessionsByDate.get(key) ?? [];
-                    const dayUnavailable = unavailableByDate.get(key) ?? [];
-                    return (
-                      <div key={key} className={inCurrentMonth ? 'calendar-cell' : 'calendar-cell outside-month'}>
-                        <div className='calendar-cell-header'>
-                          <span>{date.getDate()}</span>
-                          <button type='button' className='calendar-add' onClick={() => openCreateSession(date)}>+</button>
-                        </div>
-                        <div className='calendar-events'>
-                          {dayUnavailable.map((period) => (
-                            <button
-                              type='button'
-                              key={`${key}-unavailable-${period.id}`}
-                              className='calendar-unavailable'
-                              title='Edit unavailable period'
-                              onClick={() => openEditUnavailable(period)}
-                            >
-                              {period.reason?.trim() ? period.reason : 'Unavailable'}
-                            </button>
-                          ))}
-                          {daySessions.map((session) => (
-                            <button
-                              type='button'
-                              key={session.id}
-                              className='calendar-event'
-                              onClick={() => openEditSession(session)}
-                              title={`Edit ${session.title}`}
-                            >
-                              <span>{new Date(session.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                              <strong>{session.coacheeName || 'Coachee'}</strong>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
+              <MonthCalendarView
+                calendarDays={calendarDays}
+                sessionsByDate={sessionsByDate}
+                unavailableByDate={unavailableByDate}
+                onCreateSession={openCreateSession}
+                onEditSession={openEditSession}
+                onEditUnavailable={openEditUnavailable}
+              />
             ) : viewMode === 'week' ? (
-              <div className='week-scheduler'>
-                <div className='week-header-row'>
-                  <div className='week-time-header'>Time</div>
-                  {weekDays.map((day) => {
-                    const dayKey = toDateKey(day);
-                    return (
-                      <div key={dayKey} className='week-day-header'>
-                        <span>{WEEKDAY_LABELS[(day.getDay() + 6) % 7]}</span>
-                        <strong>{day.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</strong>
-                        <button type='button' className='calendar-add' onClick={() => openCreateSession(day)}>+</button>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className='week-body-grid'>
-                  {weekHours.map((hour) => (
-                    <div key={hour} className='week-row'>
-                      <div className='week-time-label'>{formatHourLabel(hour)}</div>
-                      {weekDays.map((day) => {
-                        const dayKey = toDateKey(day);
-                        const daySessions = weekSessionsByHour.get(`${dayKey}|${hour}`) ?? [];
-                        const dayUnavailable = weekUnavailableByHour.get(`${dayKey}|${hour}`) ?? [];
-                        return (
-                          <div key={`${dayKey}-${hour}`} className='week-slot'>
-                            {dayUnavailable.map((period) => (
-                              <button
-                                type='button'
-                                key={`unavailable-${period.id}-${hour}`}
-                                className='calendar-unavailable week-entry'
-                                onClick={() => openEditUnavailable(period)}
-                              >
-                                {period.reason?.trim() ? period.reason : 'Unavailable'}
-                              </button>
-                            ))}
-                            {daySessions.map((session) => (
-                              <button
-                                type='button'
-                                key={`session-${session.id}-${hour}`}
-                                className='calendar-event week-entry'
-                                onClick={() => openEditSession(session)}
-                                title={`Edit ${session.title}`}
-                              >
-                                <strong>{session.coacheeName || 'Coachee'}</strong>
-                                <span>{new Date(session.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                              </button>
-                            ))}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <WeekCalendarView
+                weekDays={weekDays}
+                weekHours={weekHours}
+                weekSessionsByHour={weekSessionsByHour}
+                weekUnavailableByHour={weekUnavailableByHour}
+                onCreateSession={openCreateSession}
+                onEditSession={openEditSession}
+                onEditUnavailable={openEditUnavailable}
+              />
             ) : (
-              <div className='calendar-year-grid'>
-                {yearMonthSummary.map((monthData) => (
-                  <button
-                    key={monthData.month}
-                    type='button'
-                    className='calendar-year-card'
-                    onClick={() => {
-                      setMonthCursor(new Date(monthCursor.getFullYear(), monthData.month, 1));
-                      setViewMode('month');
-                    }}
-                  >
-                    <strong>{monthData.label}</strong>
-                    <span>{monthData.sessionCount} sessions</span>
-                    <span>{monthData.unavailableCount} unavailable</span>
-                  </button>
-                ))}
-              </div>
+              <YearCalendarView
+                year={monthCursor.getFullYear()}
+                yearMonthSummary={yearMonthSummary}
+                onPickMonth={(month) => {
+                  setMonthCursor(new Date(monthCursor.getFullYear(), month, 1));
+                  setViewMode('month');
+                }}
+              />
             )}
           </>
         )}

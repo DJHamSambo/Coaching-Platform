@@ -5,6 +5,7 @@ import { CalendarPanel } from './components/CalendarPanel';
 import { AdministrationPanel } from './components/AdministrationPanel';
 import { LoginScreen } from './components/LoginScreen';
 import { clearToken, createPlan, getMe, getToken, listAdminCoachees, listCoachDirectory, listPlans } from './api';
+import { SESSION_EXPIRED_MESSAGE } from './constants/messages';
 import { requirementTitle } from './data/seed';
 import type { AdminCoachee, AdminCoach, CoachingPlan, CurrentUser } from './types';
 
@@ -71,7 +72,7 @@ export default function App() {
       setCurrentUser(null);
       setSelectedPlan(null);
       setActiveModule('plans');
-      setPlansError('Your session expired. Please sign in again.');
+      setPlansError(SESSION_EXPIRED_MESSAGE);
     }
 
     window.addEventListener('auth:expired', handleAuthExpired);

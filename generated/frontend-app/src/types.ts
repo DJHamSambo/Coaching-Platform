@@ -69,30 +69,6 @@ export interface SessionItem {
   requestedBy: 'coach' | 'coachee';
 }
 
-export interface CalendarSession {
-  id: string;
-  title: string;
-  date: string;
-  durationMinutes: number;
-  coacheeId: string | null;
-  coacheeName: string;
-  notes: string;
-}
-
-export interface WeeklyAvailabilityWindow {
-  id: string;
-  weekday: number;
-  startTime: string;
-  endTime: string;
-}
-
-export interface UnavailablePeriod {
-  id: string;
-  startAt: string;
-  endAt: string;
-  reason: string;
-}
-
 export interface DiscussionItem {
   id: string;
   taskId: string;
@@ -116,3 +92,5 @@ export interface ResourceItem {
   category: 'guide' | 'worksheet' | 'link';
   scope: 'plan' | 'shared';
 }
+
+export type { CalendarSession, WeeklyAvailabilityWindow, UnavailablePeriod } from './types/calendarTypes';
