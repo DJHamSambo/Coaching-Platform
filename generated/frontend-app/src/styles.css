@@ -312,6 +312,17 @@ button.primary {
   text-transform: uppercase;
 }
 
+.week-availability-pill {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 1;
+  color: #0b6a61;
+  border: 1px solid #8fd3c7;
+  background: #e8f8f4;
+  border-radius: 999px;
+  padding: 3px 6px;
+}
+
 .week-body-grid {
   display: flex;
   flex-direction: column;
@@ -339,6 +350,14 @@ button.primary {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+}
+
+.week-slot.available-slot {
+  background: linear-gradient(180deg, #f5fcfa 0%, #ffffff 100%);
+}
+
+.week-slot.blocked-slot {
+  background: #fff8f8;
 }
 
 .week-entry {
@@ -377,6 +396,11 @@ button.primary {
   background: #fff;
 }
 
+.calendar-cell.available-day {
+  border-color: #9edacc;
+  background: linear-gradient(180deg, #f3fcf9 0%, #ffffff 28%);
+}
+
 .calendar-cell.outside-month {
   opacity: 0.5;
   background: #f7fbfa;
@@ -404,6 +428,13 @@ button.primary {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.calendar-availability-hint {
+  margin: 0 0 6px;
+  font-size: 10px;
+  color: #0b6a61;
+  line-height: 1.35;
 }
 
 .calendar-event {

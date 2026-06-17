@@ -12,7 +12,7 @@ export interface CurrentUser {
   id: string;
   username: string;
   email: string;
-  role: 'admin' | 'coach';
+  role: 'admin' | 'coach' | 'coachee';
   isAdmin: boolean;
 }
 
@@ -27,6 +27,8 @@ export interface AdminCoach {
 export interface AdminCoachee extends Coachee {
   addedById: string;
   addedByUsername: string;
+  user?: string | null;
+  userUsername?: string;
 }
 
 export interface CoachingPlan {

@@ -1,4 +1,4 @@
-import type { CalendarSession, UnavailablePeriod } from '../../types';
+import type { CalendarSession, UnavailablePeriod, WeeklyAvailabilityWindow } from '../../types';
 import { formatHourLabel, toDateKey, WEEKDAY_LABELS } from './calendarUtils';
 import { sanitizeInput } from '../adminFormUtils';
 
@@ -18,6 +18,7 @@ interface MonthCalendarViewProps {
   calendarDays: DayCell[];
   sessionsByDate: Map<string, CalendarSession[]>;
   unavailableByDate: Map<string, UnavailablePeriod[]>;
+  availabilityByDate: Map<string, WeeklyAvailabilityWindow[]>;
   onCreateSession: (day: Date) => void;
   onEditSession: (session: CalendarSession) => void;
   onEditUnavailable: (period: UnavailablePeriod) => void;
@@ -70,6 +71,7 @@ export function MonthCalendarView({
   calendarDays,
   sessionsByDate,
   unavailableByDate,
+  availabilityByDate,
   onCreateSession,
   onEditSession,
   onEditUnavailable,
@@ -84,15 +86,26 @@ export function MonthCalendarView({
 
       <div className='calendar-grid'>
         {calendarDays.map(({ date, inCurrentMonth }) => {
-          const key = date.toISOString().slice(0, 10);
+          const key = toDateKey(date);
           const daySessions = sessionsByDate.get(key) ?? [];
           const dayUnavailable = unavailableByDate.get(key) ?? [];
+          const dayAvailability = availabilityByDate.get(key) ?? [];
+          const dayClassName = [
+            'calendar-cell',
+            !inCurrentMonth ? 'outside-month' : '',
+            dayAvailability.length ? 'available-day' : '',
+          ].filter(Boolean).join(' ');
           return (
-            <div key={key} className={inCurrentMonth ? 'calendar-cell' : 'calendar-cell outside-month'}>
+            <div key={key} className={dayClassName}>
               <div className='calendar-cell-header'>
                 <span>{date.getDate()}</span>
                 <button type='button' className='calendar-add' onClick={() => onCreateSession(date)}>+</button>
               </div>
+              {dayAvailability.length > 0 && (
+                <p className='calendar-availability-hint'>
+                  Available {dayAvailability.map((window) => `${window.startTime.slice(0, 5)}-${window.endTime.slice(0, 5)}`).join(', ')}
+                </p>
+              )}
               <div className='calendar-events'>
                 {dayUnavailable.map((period) => (
                   <UnavailableEntryButton
@@ -119,6 +132,7 @@ interface WeekCalendarViewProps {
   weekHours: number[];
   weekSessionsByHour: Map<string, CalendarSession[]>;
   weekUnavailableByHour: Map<string, UnavailablePeriod[]>;
+  weekAvailabilityByHour: Map<string, WeeklyAvailabilityWindow[]>;
   onCreateSession: (day: Date) => void;
   onEditSession: (session: CalendarSession) => void;
   onEditUnavailable: (period: UnavailablePeriod) => void;
@@ -129,6 +143,7 @@ export function WeekCalendarView({
   weekHours,
   weekSessionsByHour,
   weekUnavailableByHour,
+  weekAvailabilityByHour,
   onCreateSession,
   onEditSession,
   onEditUnavailable,
@@ -139,10 +154,12 @@ export function WeekCalendarView({
         <div className='week-time-header'>Time</div>
         {weekDays.map((day) => {
           const dayKey = toDateKey(day);
+          const hasDayAvailability = weekHours.some((hour) => (weekAvailabilityByHour.get(`${dayKey}|${hour}`)?.length ?? 0) > 0);
           return (
             <div key={dayKey} className='week-day-header'>
               <span>{WEEKDAY_LABELS[(day.getDay() + 6) % 7]}</span>
               <strong>{day.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</strong>
+              {hasDayAvailability && <small className='week-availability-pill'>Available</small>}
               <button type='button' className='calendar-add' onClick={() => onCreateSession(day)}>+</button>
             </div>
           );
@@ -157,8 +174,14 @@ export function WeekCalendarView({
               const dayKey = toDateKey(day);
               const daySessions = weekSessionsByHour.get(`${dayKey}|${hour}`) ?? [];
               const dayUnavailable = weekUnavailableByHour.get(`${dayKey}|${hour}`) ?? [];
+              const dayAvailability = weekAvailabilityByHour.get(`${dayKey}|${hour}`) ?? [];
+              const slotClassName = [
+                'week-slot',
+                dayAvailability.length ? 'available-slot' : '',
+                dayUnavailable.length ? 'blocked-slot' : '',
+              ].filter(Boolean).join(' ');
               return (
-                <div key={`${dayKey}-${hour}`} className='week-slot'>
+                <div key={`${dayKey}-${hour}`} className={slotClassName}>
                   {dayUnavailable.map((period) => {
                     const safeReason = toSafeTitle(period.reason || 'Unavailable');
                     return (

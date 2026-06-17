@@ -7,12 +7,13 @@ import {
   deleteSession,
   deleteUnavailablePeriod,
   listAvailabilityWindows,
+  listMyCalendarCoaches,
   listSessions,
   listUnavailablePeriods,
   updateUnavailablePeriod,
   updateSession,
 } from '../api';
-import type { AdminCoachee, CalendarSession, UnavailablePeriod, WeeklyAvailabilityWindow } from '../types';
+import type { AdminCoachee, AdminCoach, CalendarSession, CurrentUser, UnavailablePeriod, WeeklyAvailabilityWindow } from '../types';
 import { MonthCalendarView, WeekCalendarView, YearCalendarView } from './calendar/CalendarViews';
 import { formatHourLabel, toDateInputValue, toDateKey, toLocalDateTimeInputValue, WEEKDAY_LABELS } from './calendar/calendarUtils';
 
@@ -22,6 +23,7 @@ const WEEK_END_STORAGE_KEY = 'calendar_week_end_hour';
 
 interface CalendarPanelProps {
   coachees: AdminCoachee[];
+  currentUser: CurrentUser;
 }
 
 interface SessionFormState {
@@ -31,6 +33,8 @@ interface SessionFormState {
   durationMinutes: number;
   coacheeId: string;
   notes: string;
+  status: 'requested' | 'accepted' | 'proposed' | 'rejected';
+  responseNote: string;
 }
 
 interface UnavailableFormState {
@@ -47,6 +51,8 @@ const EMPTY_SESSION_FORM: SessionFormState = {
   durationMinutes: 60,
   coacheeId: '',
   notes: '',
+  status: 'requested',
+  responseNote: '',
 };
 
 const EMPTY_UNAVAILABLE_EDIT_FORM: UnavailableFormState = {
@@ -77,7 +83,35 @@ function getStoredHour(key: string, fallback: number): number {
   return Math.min(23, Math.max(0, Math.trunc(value)));
 }
 
-export function CalendarPanel({ coachees }: CalendarPanelProps) {
+function isWithinAvailabilityWindow(date: Date, durationMinutes: number, windows: WeeklyAvailabilityWindow[]): boolean {
+  const weekday = (date.getDay() + 6) % 7;
+  const startMinutes = date.getHours() * 60 + date.getMinutes();
+  const endMinutes = startMinutes + durationMinutes;
+
+  return windows.some((window) => {
+    if (window.weekday !== weekday) return false;
+    const [startHour, startMinute] = window.startTime.slice(0, 5).split(':').map(Number);
+    const [endHour, endMinute] = window.endTime.slice(0, 5).split(':').map(Number);
+    const windowStart = startHour * 60 + startMinute;
+    const windowEnd = endHour * 60 + endMinute;
+    return startMinutes >= windowStart && endMinutes <= windowEnd;
+  });
+}
+
+function overlapsUnavailablePeriod(date: Date, durationMinutes: number, periods: UnavailablePeriod[]): boolean {
+  const start = date.getTime();
+  const end = start + durationMinutes * 60 * 1000;
+
+  return periods.some((period) => {
+    const periodStart = new Date(period.startAt).getTime();
+    const periodEnd = new Date(period.endAt).getTime();
+    if (Number.isNaN(periodStart) || Number.isNaN(periodEnd)) return false;
+    return periodStart < end && periodEnd > start;
+  });
+}
+
+export function CalendarPanel({ coachees, currentUser }: CalendarPanelProps) {
+  const isCoachee = currentUser.role === 'coachee';
   const [monthCursor, setMonthCursor] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -90,6 +124,8 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
   const [unavailablePeriods, setUnavailablePeriods] = useState<UnavailablePeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [linkedCoaches, setLinkedCoaches] = useState<AdminCoach[]>([]);
+  const [selectedCoachId, setSelectedCoachId] = useState<string>('');
 
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [sessionForm, setSessionForm] = useState<SessionFormState>(EMPTY_SESSION_FORM);
@@ -107,9 +143,44 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
   }
 
   useEffect(() => {
+    if (!isCoachee) {
+      setLinkedCoaches([]);
+      setSelectedCoachId('');
+      return;
+    }
+
+    let cancelled = false;
+    listMyCalendarCoaches()
+      .then((coaches) => {
+        if (cancelled) return;
+        setLinkedCoaches(coaches);
+        setSelectedCoachId((prev) => prev || coaches[0]?.id || '');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLinkedCoaches([]);
+          setSelectedCoachId('');
+          setError('Could not load linked coaches.');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isCoachee]);
+
+  useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.all([listSessions(), listAvailabilityWindows(), listUnavailablePeriods()])
+
+    const availabilityPromise = isCoachee
+      ? (selectedCoachId ? listAvailabilityWindows(selectedCoachId) : Promise.resolve([]))
+      : listAvailabilityWindows();
+    const unavailablePromise = isCoachee
+      ? (selectedCoachId ? listUnavailablePeriods(selectedCoachId) : Promise.resolve([]))
+      : listUnavailablePeriods();
+
+    Promise.all([listSessions(), availabilityPromise, unavailablePromise])
       .then(([sessionsData, availabilityData, unavailableData]) => {
         if (cancelled) return;
         setSessions(sessionsData);
@@ -130,7 +201,7 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isCoachee, selectedCoachId]);
 
   useEffect(() => {
     window.localStorage.setItem(WEEK_START_STORAGE_KEY, String(weekStartHour));
@@ -213,7 +284,9 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
   const sessionsByDate = useMemo(() => {
     const buckets = new Map<string, CalendarSession[]>();
     for (const session of sessions) {
-      const key = session.date.slice(0, 10);
+      const sessionDate = new Date(session.date);
+      if (Number.isNaN(sessionDate.getTime())) continue;
+      const key = toDateKey(sessionDate);
       const existing = buckets.get(key) ?? [];
       existing.push(session);
       buckets.set(key, existing);
@@ -288,6 +361,62 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
 
     return buckets;
   }, [unavailablePeriods, weekDays, weekHours]);
+
+  const availabilityByWeekday = useMemo(() => {
+    const buckets = new Map<number, WeeklyAvailabilityWindow[]>();
+    for (const window of availability) {
+      const existing = buckets.get(window.weekday) ?? [];
+      existing.push(window);
+      buckets.set(window.weekday, existing);
+    }
+    for (const values of buckets.values()) {
+      values.sort((a, b) => a.startTime.localeCompare(b.startTime));
+    }
+    return buckets;
+  }, [availability]);
+
+  const monthAvailabilityByDate = useMemo(() => {
+    const buckets = new Map<string, WeeklyAvailabilityWindow[]>();
+    for (const { date } of calendarDays) {
+      const weekday = (date.getDay() + 6) % 7;
+      const key = toDateKey(date);
+      const windows = availabilityByWeekday.get(weekday) ?? [];
+      if (windows.length) {
+        buckets.set(key, windows);
+      }
+    }
+    return buckets;
+  }, [calendarDays, availabilityByWeekday]);
+
+  const weekAvailabilityByHour = useMemo(() => {
+    const buckets = new Map<string, WeeklyAvailabilityWindow[]>();
+
+    for (const day of weekDays) {
+      const dayKey = toDateKey(day);
+      const weekday = (day.getDay() + 6) % 7;
+      const dayWindows = availabilityByWeekday.get(weekday) ?? [];
+      if (!dayWindows.length) continue;
+
+      for (const hour of weekHours) {
+        const slotStartMinutes = hour * 60;
+        const slotEndMinutes = (hour + 1) * 60;
+        for (const window of dayWindows) {
+          const [startHour, startMinute] = window.startTime.slice(0, 5).split(':').map(Number);
+          const [endHour, endMinute] = window.endTime.slice(0, 5).split(':').map(Number);
+          const windowStartMinutes = startHour * 60 + startMinute;
+          const windowEndMinutes = endHour * 60 + endMinute;
+          if (windowStartMinutes < slotEndMinutes && windowEndMinutes > slotStartMinutes) {
+            const key = `${dayKey}|${hour}`;
+            const existing = buckets.get(key) ?? [];
+            existing.push(window);
+            buckets.set(key, existing);
+          }
+        }
+      }
+    }
+
+    return buckets;
+  }, [availabilityByWeekday, weekDays, weekHours]);
 
   function handleToday(): void {
     const now = new Date();
@@ -365,7 +494,13 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
       start.setHours(9, 0, 0, 0);
     }
     const defaultDate = toDateInputValue(start);
-    setSessionForm({ ...EMPTY_SESSION_FORM, date: defaultDate, coacheeId: defaultCoachee });
+    setSessionForm({
+      ...EMPTY_SESSION_FORM,
+      title: isCoachee ? 'Session Request' : EMPTY_SESSION_FORM.title,
+      date: defaultDate,
+      coacheeId: isCoachee ? '' : defaultCoachee,
+      status: isCoachee ? 'requested' : 'accepted',
+    });
     setShowSessionModal(true);
   }
 
@@ -378,25 +513,67 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
       durationMinutes: session.durationMinutes,
       coacheeId: session.coacheeId ?? '',
       notes: session.notes,
+      status: session.status,
+      responseNote: session.responseNote,
     });
     setShowSessionModal(true);
   }
 
   async function handleSaveSession(event: React.FormEvent): Promise<void> {
     event.preventDefault();
-    if (!sessionForm.date || !sessionForm.coacheeId) {
-      setError('Date/time and coachee are required.');
+    if (!sessionForm.date) {
+      setError('Date/time is required.');
       return;
+    }
+
+    if (!isCoachee && !sessionForm.coacheeId) {
+      setError('Coachee is required for coach-scheduled sessions.');
+      return;
+    }
+
+    if (isCoachee && !selectedCoachId) {
+      setError('Please select a coach before requesting a session.');
+      return;
+    }
+
+    if (isCoachee) {
+      const selectedDate = new Date(sessionForm.date);
+      if (Number.isNaN(selectedDate.getTime())) {
+        setError('Please choose a valid date and time for your request.');
+        return;
+      }
+
+      if (!availability.length) {
+        setError('The selected coach has no published availability yet.');
+        return;
+      }
+
+      if (!isWithinAvailabilityWindow(selectedDate, sessionForm.durationMinutes, availability)) {
+        setError('Requested time is outside the selected coach availability.');
+        return;
+      }
+
+      if (overlapsUnavailablePeriod(selectedDate, sessionForm.durationMinutes, unavailablePeriods)) {
+        setError('Requested time overlaps an unavailable period for this coach.');
+        return;
+      }
     }
 
     try {
       if (sessionForm.id) {
+        if (isCoachee) {
+          setError('Coachees cannot edit existing sessions. Coaches review requests.');
+          return;
+        }
+
         const updated = await updateSession(sessionForm.id, {
           title: sessionForm.title,
           date: sessionForm.date,
           durationMinutes: sessionForm.durationMinutes,
           coacheeId: sessionForm.coacheeId,
           notes: sessionForm.notes,
+          status: sessionForm.status,
+          responseNote: sessionForm.responseNote,
         });
         setSessions((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
       } else {
@@ -404,7 +581,9 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
           title: sessionForm.title,
           date: sessionForm.date,
           durationMinutes: sessionForm.durationMinutes,
-          coacheeId: sessionForm.coacheeId,
+          coacheeId: isCoachee ? undefined : sessionForm.coacheeId,
+          coachId: isCoachee ? selectedCoachId : undefined,
+          requestedBy: isCoachee ? 'coachee' : 'coach',
           notes: sessionForm.notes,
         });
         setSessions((prev) => [...prev, created]);
@@ -412,13 +591,18 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
       setShowSessionModal(false);
       setSessionForm(EMPTY_SESSION_FORM);
       setError(null);
-    } catch {
-      setError('Could not save session.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not save session.';
+      setError(message);
     }
   }
 
   async function handleDeleteSession(): Promise<void> {
     if (!sessionForm.id) return;
+    if (isCoachee) {
+      setError('Coachees cannot delete sessions.');
+      return;
+    }
     try {
       await deleteSession(sessionForm.id);
       setSessions((prev) => prev.filter((item) => item.id !== sessionForm.id));
@@ -557,7 +741,11 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
         <div className='calendar-toolbar'>
           <div>
             <h2 style={{ margin: 0 }}>Calendar</h2>
-            <p className='muted' style={{ margin: '6px 0 0' }}>Book coaching sessions and manage your month, week, or year view.</p>
+            <p className='muted' style={{ margin: '6px 0 0' }}>
+              {isCoachee
+                ? 'Select a coach, review their availability, and request a session.'
+                : 'Book coaching sessions and manage your month, week, or year view.'}
+            </p>
           </div>
           <div className='calendar-toolbar-actions'>
             <div className='calendar-view-toggle'>
@@ -569,9 +757,26 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
             <strong>{calendarTitle}</strong>
             <button type='button' onClick={handleNextView}>Next</button>
             <button type='button' onClick={handleToday}>Today</button>
-            <button type='button' className='primary' onClick={() => openCreateSession()}>New Session</button>
+            <button type='button' className='primary' onClick={() => openCreateSession()}>
+              {isCoachee ? 'Request Session' : 'New Session'}
+            </button>
           </div>
         </div>
+
+        {isCoachee && (
+          <div className='calendar-week-config'>
+            <label>
+              Coach
+              <select value={selectedCoachId} onChange={(event) => setSelectedCoachId(event.target.value)}>
+                {!selectedCoachId && <option value=''>Select coach</option>}
+                {linkedCoaches.map((coach) => (
+                  <option key={coach.id} value={coach.id}>{coach.username}</option>
+                ))}
+              </select>
+            </label>
+            <p className='muted' style={{ margin: 0 }}>Green cells indicate coach availability.</p>
+          </div>
+        )}
 
         {viewMode === 'week' && (
           <div className='calendar-week-config'>
@@ -604,9 +809,10 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
                 calendarDays={calendarDays}
                 sessionsByDate={sessionsByDate}
                 unavailableByDate={unavailableByDate}
+                availabilityByDate={monthAvailabilityByDate}
                 onCreateSession={openCreateSession}
                 onEditSession={openEditSession}
-                onEditUnavailable={openEditUnavailable}
+                onEditUnavailable={isCoachee ? () => {} : openEditUnavailable}
               />
             ) : viewMode === 'week' ? (
               <WeekCalendarView
@@ -614,9 +820,10 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
                 weekHours={weekHours}
                 weekSessionsByHour={weekSessionsByHour}
                 weekUnavailableByHour={weekUnavailableByHour}
+                weekAvailabilityByHour={weekAvailabilityByHour}
                 onCreateSession={openCreateSession}
                 onEditSession={openEditSession}
-                onEditUnavailable={openEditUnavailable}
+                onEditUnavailable={isCoachee ? () => {} : openEditUnavailable}
               />
             ) : (
               <YearCalendarView
@@ -632,7 +839,7 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
         )}
       </div>
 
-      <aside className='calendar-sidebar'>
+      {!isCoachee && <aside className='calendar-sidebar'>
         <div className='card'>
           <h3 style={{ marginTop: 0 }}>Weekly Availability</h3>
           <form onSubmit={(event) => { void handleAddAvailability(event); }}>
@@ -696,7 +903,7 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
             ))}
           </ul>
         </div>
-      </aside>
+      </aside>}
 
       {showUnavailableModal && (
         <div className='admin-panel-modal-overlay'>
@@ -754,11 +961,18 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
             >
               x
             </button>
-            <h3>{sessionForm.id ? 'Edit session' : 'New session'}</h3>
+            <h3>
+              {sessionForm.id ? 'Edit session' : (isCoachee ? 'Request session' : 'New session')}
+            </h3>
+            {error && <p className='muted' style={{ color: '#9f1239' }}>{error}</p>}
             <form onSubmit={(event) => { void handleSaveSession(event); }}>
               <label>
                 Session title
-                <input value={sessionForm.title} onChange={(event) => setSessionForm((prev) => ({ ...prev, title: event.target.value }))} />
+                <input
+                  value={sessionForm.title}
+                  onChange={(event) => setSessionForm((prev) => ({ ...prev, title: event.target.value }))}
+                  disabled={isCoachee && Boolean(sessionForm.id)}
+                />
               </label>
               <label>
                 Date and time
@@ -766,6 +980,7 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
                   type='datetime-local'
                   value={sessionForm.date}
                   onChange={(event) => setSessionForm((prev) => ({ ...prev, date: event.target.value }))}
+                  disabled={isCoachee && Boolean(sessionForm.id)}
                 />
               </label>
               <label>
@@ -776,27 +991,66 @@ export function CalendarPanel({ coachees }: CalendarPanelProps) {
                   step={15}
                   value={sessionForm.durationMinutes}
                   onChange={(event) => setSessionForm((prev) => ({ ...prev, durationMinutes: Number(event.target.value) || 60 }))}
+                  disabled={isCoachee && Boolean(sessionForm.id)}
                 />
               </label>
-              <label>
-                Coachee
-                <select value={sessionForm.coacheeId} onChange={(event) => setSessionForm((prev) => ({ ...prev, coacheeId: event.target.value }))}>
-                  <option value=''>Select coachee</option>
-                  {coachees.map((coachee) => (
-                    <option key={coachee.id} value={coachee.id}>{coachee.name}</option>
-                  ))}
-                </select>
-              </label>
+              {!isCoachee ? (
+                <label>
+                  Coachee
+                  <select value={sessionForm.coacheeId} onChange={(event) => setSessionForm((prev) => ({ ...prev, coacheeId: event.target.value }))}>
+                    <option value=''>Select coachee</option>
+                    {coachees.map((coachee) => (
+                      <option key={coachee.id} value={coachee.id}>{coachee.name}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label>
+                  Coach
+                  <select value={selectedCoachId} onChange={(event) => setSelectedCoachId(event.target.value)} disabled={Boolean(sessionForm.id)}>
+                    <option value=''>Select coach</option>
+                    {linkedCoaches.map((coach) => (
+                      <option key={coach.id} value={coach.id}>{coach.username}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {!isCoachee && sessionForm.id && (
+                <>
+                  <label>
+                    Request status
+                    <select value={sessionForm.status} onChange={(event) => setSessionForm((prev) => ({ ...prev, status: event.target.value as SessionFormState['status'] }))}>
+                      <option value='requested'>Requested</option>
+                      <option value='accepted'>Accepted</option>
+                      <option value='proposed'>Propose new time</option>
+                      <option value='rejected'>Rejected</option>
+                    </select>
+                  </label>
+                  <label>
+                    Response note
+                    <textarea
+                      rows={3}
+                      value={sessionForm.responseNote}
+                      onChange={(event) => setSessionForm((prev) => ({ ...prev, responseNote: event.target.value }))}
+                    />
+                  </label>
+                </>
+              )}
               <label>
                 Notes
                 <textarea
                   rows={4}
                   value={sessionForm.notes}
                   onChange={(event) => setSessionForm((prev) => ({ ...prev, notes: event.target.value }))}
+                  disabled={isCoachee && Boolean(sessionForm.id)}
                 />
               </label>
-              <button type='submit' className='primary'>{sessionForm.id ? 'Save changes' : 'Create session'}</button>
-              {sessionForm.id && (
+              {(!isCoachee || !sessionForm.id) && (
+                <button type='submit' className='primary' disabled={isCoachee && !selectedCoachId}>
+                  {sessionForm.id ? 'Save changes' : (isCoachee ? 'Request session' : 'Create session')}
+                </button>
+              )}
+              {sessionForm.id && !isCoachee && (
                 <button type='button' onClick={() => { void handleDeleteSession(); }} style={{ marginLeft: 8 }}>Delete</button>
               )}
             </form>

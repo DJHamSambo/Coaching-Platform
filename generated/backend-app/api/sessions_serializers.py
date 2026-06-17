@@ -44,11 +44,13 @@ class SessionsSerializer(serializers.ModelSerializer):
             "notes",
             "mode",
             "requested_by",
+            "status",
+            "response_note",
             "owner",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ("id", "owner", "created_at", "updated_at", "coachee_name")
+        read_only_fields = ("id", "owner", "created_at", "updated_at", "coachee_name", "requested_by")
 
     def get_coachee_name(self, obj):
         return obj.coachee.name if obj.coachee else ""

@@ -224,7 +224,7 @@ export default function App() {
           />
         )}
 
-        {activeModule === 'calendar' && <CalendarPanel coachees={coachees} />}
+        {activeModule === 'calendar' && <CalendarPanel coachees={coachees} currentUser={currentUser} />}
 
         {activeModule === 'administration' && <AdministrationPanel currentUser={currentUser} />}
       </section>

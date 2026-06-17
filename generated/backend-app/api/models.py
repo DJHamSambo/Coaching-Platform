@@ -9,6 +9,7 @@ class Coachee(models.Model):
     name = models.CharField(max_length=255)
     email = models.EmailField(blank=True, default="")
     notes = models.TextField(blank=True, default="")
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="coachee_profiles")
     added_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="coachees")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -79,6 +80,12 @@ class Message(models.Model):
 
 class Session(models.Model):
     MODE_CHOICES = [("video", "Video"), ("in-person", "In Person"), ("phone", "Phone")]
+    STATUS_CHOICES = [
+        ("requested", "Requested"),
+        ("accepted", "Accepted"),
+        ("proposed", "Proposed new time"),
+        ("rejected", "Rejected"),
+    ]
     title = models.CharField(max_length=255)
     date = models.DateTimeField(null=True, blank=True)
     duration_minutes = models.PositiveIntegerField(default=60)
@@ -86,6 +93,8 @@ class Session(models.Model):
     notes = models.TextField(blank=True, default="")
     mode = models.CharField(max_length=20, choices=MODE_CHOICES, default="video")
     requested_by = models.CharField(max_length=100, default="coachee")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="accepted")
+    response_note = models.TextField(blank=True, default="")
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sessions")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
