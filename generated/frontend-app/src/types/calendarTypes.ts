@@ -6,6 +6,7 @@ export interface CalendarSession {
   coacheeId: string | null;
   coacheeName: string;
   notes: string;
+  requestedBy: 'coach' | 'coachee';
 }
 
 export interface WeeklyAvailabilityWindow {

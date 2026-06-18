@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createAction, createDiscussion, getCurrentUsername, listActions, listDiscussions, updateAction, updateActionStatus, updatePlan } from '../api';
-import type { AdminCoach, AdminCoachee, CoachingPlan, DiscussionItem, PlanAction, TaskStatus } from '../types';
+import { createAction, createDiscussion, getCurrentUsername, getPlan, listActions, listDiscussions, updateAction, updateActionStatus, updatePlan } from '../api';
+import type { AdminCoach, AdminCoachee, CoachingPlan, CurrentUser, DiscussionItem, PlanAction, TaskStatus } from '../types';
 
 interface PlanDetailProps {
   plan: CoachingPlan;
   coachees: AdminCoachee[];
   coaches: AdminCoach[];
+  currentUser: CurrentUser;
   onBack: () => void;
   onPlanUpdated: (plan: CoachingPlan) => void;
 }
@@ -18,7 +19,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 
 const STATUS_OPTIONS: TaskStatus[] = ['backlog', 'inProgress', 'done'];
 
-export function PlanDetail({ plan, coachees, coaches, onBack, onPlanUpdated }: PlanDetailProps) {
+export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPlanUpdated }: PlanDetailProps) {
   const [actions, setActions] = useState<PlanAction[]>([]);
   const [discussions, setDiscussions] = useState<DiscussionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,10 +49,23 @@ export function PlanDetail({ plan, coachees, coaches, onBack, onPlanUpdated }: P
   const coacheeName = plan.coacheeName ?? coachees.find((c) => c.id === plan.coacheeId)?.name ?? null;
   const assigneeOptions = useMemo(() => {
     const values = new Set<string>();
-    coaches.filter((coach) => !coach.isAdmin).forEach((coach) => values.add(coach.username));
-    coachees.forEach((coachee) => values.add(coachee.name));
+
+    if (currentUser.role === 'coachee') {
+      // Coachees can only assign to themselves or the coach who assigned the plan
+      values.add(currentUser.username);
+      if (plan.coachUsername) {
+        values.add(plan.coachUsername);
+      }
+    } else {
+      // Coaches can only assign to themselves or the assigned coachee
+      values.add(currentUser.username);
+      if (coacheeName) {
+        values.add(coacheeName);
+      }
+    }
+
     return Array.from(values).sort((a, b) => a.localeCompare(b));
-  }, [coaches, coachees]);
+  }, [plan.coachUsername, plan.coacheeId, plan.coacheeName, currentUser, coacheeName]);
 
   useEffect(() => {
     if (!assignee && assigneeOptions.length > 0) {
@@ -67,6 +81,20 @@ export function PlanDetail({ plan, coachees, coaches, onBack, onPlanUpdated }: P
       .catch(() => { if (!cancelled) setError('Could not load actions from backend.'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
+  }, [plan.id]);
+
+  // Poll for action updates to sync kanban changes across users
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const updated = await listActions(plan.id);
+        setActions(updated);
+      } catch {
+        // Silent fail on polling errors
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(interval);
   }, [plan.id]);
 
   useEffect(() => {
@@ -92,6 +120,35 @@ export function PlanDetail({ plan, coachees, coaches, onBack, onPlanUpdated }: P
       cancelled = true;
     };
   }, [plan.id]);
+
+  // Sync local status when plan prop changes
+  useEffect(() => {
+    setPlanStatus(plan.status);
+    setPlanTitle(plan.title);
+    setPlanGoal(plan.goal);
+    setPlanDescription(plan.description);
+    setPlanTargetDate(plan.targetDate);
+    setPlanCoacheeId(plan.coacheeId ?? '');
+  }, [plan]);
+
+  // Poll for plan updates (for coachees to see coach's status changes)
+  useEffect(() => {
+    if (currentUser.role !== 'coachee') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const updated = await getPlan(plan.id);
+        if (updated.status !== planStatus) {
+          setPlanStatus(updated.status);
+          onPlanUpdated(updated);
+        }
+      } catch {
+        // Silent fail on polling errors
+      }
+    }, 5000); // Poll every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [plan.id, planStatus, currentUser.role, onPlanUpdated]);
 
   async function handleAddAction(event: React.FormEvent) {
     event.preventDefault();
@@ -141,6 +198,24 @@ export function PlanDetail({ plan, coachees, coaches, onBack, onPlanUpdated }: P
       setError(null);
     } catch {
       setError('Could not update plan.');
+    }
+  }
+
+  async function handleUpdatePlanStatus(newStatus: string): Promise<void> {
+    try {
+      const updated = await updatePlan(plan.id, {
+        title: plan.title,
+        goal: plan.goal,
+        description: plan.description,
+        targetDate: plan.targetDate,
+        status: newStatus as typeof plan.status,
+        coacheeId: plan.coacheeId || null,
+      });
+      onPlanUpdated(updated);
+      setPlanStatus(newStatus as typeof planStatus);
+      setError(null);
+    } catch {
+      setError('Could not update plan status.');
     }
   }
 
@@ -246,8 +321,42 @@ export function PlanDetail({ plan, coachees, coaches, onBack, onPlanUpdated }: P
               {plan.targetDate && <span className='muted'>📅 Target: {plan.targetDate}</span>}
             </div>
           </div>
-          <button type='button' className='primary' onClick={() => setEditingPlan(true)}>Edit plan</button>
+          {currentUser.role === 'coach' && (
+            <button type='button' className='primary' onClick={() => setEditingPlan(true)}>Edit plan</button>
+          )}
         </div>
+      </div>
+
+      {/* Status Section */}
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+        {currentUser.role === 'coach' ? (
+          <>
+            <strong>Status:</strong>
+            <select
+              value={plan.status}
+              onChange={(event) => void handleUpdatePlanStatus(event.target.value)}
+              style={{ padding: 6, borderRadius: 4, border: '1px solid #cbd5e1' }}
+            >
+              <option value='todo'>To Do</option>
+              <option value='inProgress'>In Progress</option>
+              <option value='done'>Done</option>
+            </select>
+          </>
+        ) : (
+          <span
+            style={{
+              display: 'inline-block',
+              padding: '6px 12px',
+              borderRadius: '16px',
+              background: '#e2e8f0',
+              color: '#1e293b',
+              fontSize: '14px',
+              fontWeight: '500',
+            }}
+          >
+            {plan.status === 'todo' ? 'To Do' : plan.status === 'inProgress' ? 'In Progress' : 'Done'}
+          </span>
+        )}
       </div>
 
       {error && <p className='muted' style={{ color: '#c0392b', marginBottom: 12 }}>{error}</p>}

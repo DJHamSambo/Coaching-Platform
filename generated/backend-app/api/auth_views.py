@@ -7,6 +7,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from api.models import Coachee
+
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
@@ -28,12 +30,19 @@ def register(request: Request) -> Response:
 @permission_classes([IsAuthenticated])
 def me(request: Request) -> Response:
     user = request.user
+    # Prefer FK link; only fall back to name for legacy coachees with no linked user account
+    has_coachee_profile = (
+        Coachee.objects.filter(user=user).exists()
+        or Coachee.objects.filter(user__isnull=True, name__iexact=user.username).exists()
+    )
+
+    role = "admin" if user.is_staff else ("coachee" if has_coachee_profile else "coach")
     return Response({
         "id": user.pk,
         "username": user.username,
         "email": user.email,
         "is_admin": bool(user.is_staff),
-        "role": "admin" if user.is_staff else "coach",
+        "role": role,
     })
 
 

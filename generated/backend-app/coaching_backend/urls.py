@@ -9,6 +9,7 @@ from api.messages_views import MessagesListView, MessagesDetailView
 from api.coachees_views import CoacheesListView, CoacheesDetailView
 from api.plans_views import PlansListView, PlansDetailView, PlanActionsListView, PlanActionsDetailView
 from api.sessions_views import (
+    MyCalendarCoachesListView,
     SessionsListView,
     SessionsDetailView,
     WeeklyAvailabilityWindowListView,
@@ -42,6 +43,7 @@ urlpatterns = [
     path("api/plans/<int:plan_id>/actions/", PlanActionsListView.as_view(), name="plan-actions-list"),
     path("api/plans/<int:plan_id>/actions/<int:pk>/", PlanActionsDetailView.as_view(), name="plan-actions-detail"),
     # Calendar sessions and coach availability
+    path("api/calendar/my-coaches/", MyCalendarCoachesListView.as_view(), name="calendar-my-coaches-list"),
     path("api/sessions/", SessionsListView.as_view(), name="sessions-list"),
     path("api/sessions/<int:pk>/", SessionsDetailView.as_view(), name="sessions-detail"),
     path("api/availability/windows/", WeeklyAvailabilityWindowListView.as_view(), name="availability-windows-list"),

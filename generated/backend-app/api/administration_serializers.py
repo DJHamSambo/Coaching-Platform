@@ -36,11 +36,12 @@ class CoachSerializer(serializers.ModelSerializer):
 
 class AdminCoacheeSerializer(serializers.ModelSerializer):
     added_by_username = serializers.CharField(source="added_by.username", read_only=True)
+    user_username = serializers.CharField(source="user.username", read_only=True)
 
     class Meta:
         model = Coachee
-        fields = ["id", "name", "email", "notes", "added_by", "added_by_username", "created_at"]
-        read_only_fields = ["id", "added_by", "added_by_username", "created_at"]
+        fields = ["id", "name", "email", "notes", "user", "user_username", "added_by", "added_by_username", "created_at"]
+        read_only_fields = ["id", "added_by", "added_by_username", "created_at", "user_username"]
 
 
 class CoachDirectorySerializer(serializers.ModelSerializer):

@@ -6,6 +6,7 @@ interface PlanListProps {
   coachees: AdminCoachee[];
   onSelectPlan: (plan: CoachingPlan) => void;
   onCreatePlan: (plan: Omit<CoachingPlan, 'id' | 'createdAt' | 'coacheeName'>) => void;
+  canCreatePlan: boolean;
   loading: boolean;
   error: string | null;
 }
@@ -22,7 +23,7 @@ const STATUS_COLORS: Record<PlanStatus, string> = {
   done: '#16a34a',
 };
 
-export function PlanList({ plans, coachees, onSelectPlan, onCreatePlan, loading, error }: PlanListProps) {
+export function PlanList({ plans, coachees, onSelectPlan, onCreatePlan, canCreatePlan, loading, error }: PlanListProps) {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -56,15 +57,17 @@ export function PlanList({ plans, coachees, onSelectPlan, onCreatePlan, loading,
           <h2>Coaching Plans</h2>
           <p className='muted'>Plans sorted by target date. Select a plan to view its kanban board and discussions.</p>
         </div>
-        <button type='button' className='primary' onClick={() => setShowForm((v) => !v)}>
-          {showForm ? 'Cancel' : '+ New Plan'}
-        </button>
+        {canCreatePlan && (
+          <button type='button' className='primary' onClick={() => setShowForm((v) => !v)}>
+            {showForm ? 'Cancel' : '+ New Plan'}
+          </button>
+        )}
       </div>
 
       {error && <p className='muted' style={{ color: '#c0392b' }}>{error}</p>}
       {loading && <p className='muted'>Loading plans…</p>}
 
-      {showForm && (
+      {canCreatePlan && showForm && (
         <form className='card' onSubmit={handleSubmit} style={{ marginBottom: 24 }}>
           <h3>Create coaching plan</h3>
           <label>
@@ -98,7 +101,11 @@ export function PlanList({ plans, coachees, onSelectPlan, onCreatePlan, loading,
 
       {!loading && plans.length === 0 && !showForm && (
         <div className='card' style={{ textAlign: 'center', padding: '40px 16px' }}>
-          <p className='muted'>No coaching plans yet. Click <strong>+ New Plan</strong> to get started.</p>
+          <p className='muted'>
+            {canCreatePlan
+              ? <>No coaching plans yet. Click <strong>+ New Plan</strong> to get started.</>
+              : 'No coaching plans available yet.'}
+          </p>
         </div>
       )}
 

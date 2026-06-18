@@ -9,6 +9,7 @@ class Coachee(models.Model):
     name = models.CharField(max_length=255)
     email = models.EmailField(blank=True, default="")
     notes = models.TextField(blank=True, default="")
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="coachee_profiles")
     added_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="coachees")
     created_at = models.DateTimeField(auto_now_add=True)
 

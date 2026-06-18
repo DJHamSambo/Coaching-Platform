@@ -88,14 +88,14 @@ export async function register(payload: RegisterPayload): Promise<{ id: number; 
   return request('/api/auth/register/', {
     method: 'POST',
     body: JSON.stringify(payload),
-  });
+  }, { skipAuth: true });
 }
 
 export async function login(payload: LoginPayload): Promise<AuthTokens> {
   return request('/api/auth/login/', {
     method: 'POST',
     body: JSON.stringify(payload),
-  });
+  }, { skipAuth: true });
 }
 
 interface ApiMe {
@@ -103,7 +103,7 @@ interface ApiMe {
   username: string;
   email: string;
   is_admin: boolean;
-  role: 'admin' | 'coach';
+  role: 'admin' | 'coach' | 'coachee';
 }
 
 interface ApiListResponse<T> {
@@ -156,9 +156,6 @@ async function ensureValidAccessToken(): Promise<string | null> {
 }
 
 async function parseClientSafeError(response: Response): Promise<string> {
-  if (response.status === 401) {
-    return SESSION_EXPIRED_MESSAGE;
-  }
 
   let parsedMessage = '';
   try {
@@ -174,6 +171,7 @@ async function parseClientSafeError(response: Response): Promise<string> {
   if (!parsedMessage) {
     if (response.status >= 500) return 'Server error. Please try again later.';
     if (response.status === 400) return 'Invalid request. Please review your input.';
+    if (response.status === 401) return 'Authentication failed. Please check your credentials.';
     if (response.status === 403) return 'You do not have permission to perform this action.';
     if (response.status === 404) return 'Requested resource was not found.';
     return GENERIC_API_ERROR_MESSAGE;
@@ -182,8 +180,12 @@ async function parseClientSafeError(response: Response): Promise<string> {
   return `${response.status} ${parsedMessage}`;
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = await ensureValidAccessToken();
+interface RequestBehavior {
+  skipAuth?: boolean;
+}
+
+async function request<T>(path: string, options: RequestInit = {}, behavior: RequestBehavior = {}): Promise<T> {
+  const token = behavior.skipAuth ? null : await ensureValidAccessToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
@@ -193,7 +195,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
 
   if (!response.ok) {
-    if (response.status === 401) {
+    if (response.status === 401 && token) {
       notifyAuthExpired();
     }
     const safeMessage = await parseClientSafeError(response);
@@ -323,6 +325,8 @@ interface ApiCoachee {
   name: string;
   email: string;
   notes: string;
+  user?: number | null;
+  user_username?: string;
   added_by?: number;
   added_by_username?: string;
 }
@@ -337,6 +341,8 @@ function toAdminCoachee(c: ApiCoachee): AdminCoachee {
     name: c.name,
     email: c.email,
     notes: c.notes,
+    user: c.user ? String(c.user) : null,
+    userUsername: c.user_username ?? '',
     addedById: c.added_by ? String(c.added_by) : '',
     addedByUsername: c.added_by_username ?? '',
   };
@@ -384,6 +390,11 @@ export async function listAdminCoaches(): Promise<AdminCoach[]> {
 
 export async function listCoachDirectory(): Promise<AdminCoach[]> {
   const items = await request<ApiCoach[]>('/api/admin/coach-directory/');
+  return items.map(toAdminCoach);
+}
+
+export async function listMyCalendarCoaches(): Promise<AdminCoach[]> {
+  const items = await request<ApiCoach[]>('/api/calendar/my-coaches/');
   return items.map(toAdminCoach);
 }
 
@@ -469,6 +480,7 @@ interface ApiPlan {
   target_date: string | null;
   coachee: number | null;
   coachee_name: string | null;
+  coach_username: string | null;
   created_at: string;
 }
 
@@ -492,6 +504,7 @@ function toCoachingPlan(p: ApiPlan): CoachingPlan {
     targetDate: p.target_date ?? '',
     coacheeId: p.coachee ? String(p.coachee) : null,
     coacheeName: p.coachee_name ?? null,
+    coachUsername: p.coach_username ?? null,
     createdAt: p.created_at.slice(0, 10),
   };
 }
@@ -499,6 +512,11 @@ function toCoachingPlan(p: ApiPlan): CoachingPlan {
 export async function listPlans(): Promise<CoachingPlan[]> {
   const plans = await request<ApiPlan[]>('/api/plans/');
   return plans.map(toCoachingPlan);
+}
+
+export async function getPlan(planId: string): Promise<CoachingPlan> {
+  const plan = await request<ApiPlan>(`/api/plans/${planId}/`);
+  return toCoachingPlan(plan);
 }
 
 export async function createPlan(payload: {
@@ -622,17 +640,25 @@ interface ApiSession {
   coachee: number | null;
   coachee_name: string;
   notes: string;
+  requested_by: 'coach' | 'coachee';
+}
+
+function toUiWallTimeDate(dateText: string): string {
+  const match = dateText.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+  if (!match) return dateText;
+  return `${match[1]}T${match[2]}`;
 }
 
 function toCalendarSession(session: ApiSession): CalendarSession {
   return {
     id: String(session.id),
     title: session.title,
-    date: session.date,
+    date: toUiWallTimeDate(session.date),
     durationMinutes: session.duration_minutes,
     coacheeId: session.coachee ? String(session.coachee) : null,
     coacheeName: session.coachee_name ?? '',
     notes: session.notes ?? '',
+    requestedBy: session.requested_by ?? 'coach',
   };
 }
 
@@ -652,7 +678,7 @@ function toApiSessionPayload(payload: {
   if (payload.title !== undefined) body.title = payload.title;
   if (payload.date !== undefined) body.date = payload.date;
   if (payload.durationMinutes !== undefined) body.duration_minutes = payload.durationMinutes;
-  if (payload.coacheeId !== undefined) body.coachee = Number(payload.coacheeId);
+  if (payload.coacheeId !== undefined) body.coachee = payload.coacheeId ? Number(payload.coacheeId) : null;
   if (payload.notes !== undefined) body.notes = payload.notes;
   return body;
 }
@@ -661,14 +687,17 @@ export async function createSession(payload: {
   title: string;
   date: string;
   durationMinutes: number;
-  coacheeId: string;
+  coacheeId?: string;
+  coachId?: string;
   notes?: string;
+  requestedBy?: 'coach' | 'coachee';
 }): Promise<CalendarSession> {
   const created = await request<ApiSession>('/api/sessions/', {
     method: 'POST',
     body: JSON.stringify({
       ...toApiSessionPayload(payload),
-      requested_by: 'coach',
+      coach_id: payload.coachId,
+      requested_by: payload.requestedBy ?? 'coach',
       mode: 'video',
     }),
   });
@@ -677,7 +706,13 @@ export async function createSession(payload: {
 
 export async function updateSession(
   sessionId: string,
-  patch: Partial<{ title: string; date: string; durationMinutes: number; coacheeId: string; notes: string }>,
+  patch: Partial<{
+    title: string;
+    date: string;
+    durationMinutes: number;
+    coacheeId: string;
+    notes: string;
+  }>,
 ): Promise<CalendarSession> {
   const body = toApiSessionPayload(patch);
   const updated = await request<ApiSession>(`/api/sessions/${sessionId}/`, {
@@ -707,8 +742,9 @@ function toAvailabilityWindow(window: ApiWeeklyAvailabilityWindow): WeeklyAvaila
   };
 }
 
-export async function listAvailabilityWindows(): Promise<WeeklyAvailabilityWindow[]> {
-  const windows = await request<ApiWeeklyAvailabilityWindow[] | ApiListResponse<ApiWeeklyAvailabilityWindow>>('/api/availability/windows/');
+export async function listAvailabilityWindows(coachId?: string): Promise<WeeklyAvailabilityWindow[]> {
+  const suffix = coachId ? `?coach_id=${encodeURIComponent(coachId)}` : '';
+  const windows = await request<ApiWeeklyAvailabilityWindow[] | ApiListResponse<ApiWeeklyAvailabilityWindow>>(`/api/availability/windows/${suffix}`);
   return toListResults(windows).map(toAvailabilityWindow);
 }
 
@@ -744,8 +780,9 @@ function toUnavailablePeriod(period: ApiUnavailablePeriod): UnavailablePeriod {
   };
 }
 
-export async function listUnavailablePeriods(): Promise<UnavailablePeriod[]> {
-  const periods = await request<ApiUnavailablePeriod[] | ApiListResponse<ApiUnavailablePeriod>>('/api/availability/unavailable/');
+export async function listUnavailablePeriods(coachId?: string): Promise<UnavailablePeriod[]> {
+  const suffix = coachId ? `?coach_id=${encodeURIComponent(coachId)}` : '';
+  const periods = await request<ApiUnavailablePeriod[] | ApiListResponse<ApiUnavailablePeriod>>(`/api/availability/unavailable/${suffix}`);
   return toListResults(periods).map(toUnavailablePeriod);
 }
 
