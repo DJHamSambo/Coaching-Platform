@@ -480,6 +480,7 @@ interface ApiPlan {
   target_date: string | null;
   coachee: number | null;
   coachee_name: string | null;
+  coach_username: string | null;
   created_at: string;
 }
 
@@ -503,6 +504,7 @@ function toCoachingPlan(p: ApiPlan): CoachingPlan {
     targetDate: p.target_date ?? '',
     coacheeId: p.coachee ? String(p.coachee) : null,
     coacheeName: p.coachee_name ?? null,
+    coachUsername: p.coach_username ?? null,
     createdAt: p.created_at.slice(0, 10),
   };
 }
@@ -510,6 +512,11 @@ function toCoachingPlan(p: ApiPlan): CoachingPlan {
 export async function listPlans(): Promise<CoachingPlan[]> {
   const plans = await request<ApiPlan[]>('/api/plans/');
   return plans.map(toCoachingPlan);
+}
+
+export async function getPlan(planId: string): Promise<CoachingPlan> {
+  const plan = await request<ApiPlan>(`/api/plans/${planId}/`);
+  return toCoachingPlan(plan);
 }
 
 export async function createPlan(payload: {
@@ -634,8 +641,6 @@ interface ApiSession {
   coachee_name: string;
   notes: string;
   requested_by: 'coach' | 'coachee';
-  status: 'requested' | 'accepted' | 'proposed' | 'rejected';
-  response_note: string;
 }
 
 function toUiWallTimeDate(dateText: string): string {
@@ -654,8 +659,6 @@ function toCalendarSession(session: ApiSession): CalendarSession {
     coacheeName: session.coachee_name ?? '',
     notes: session.notes ?? '',
     requestedBy: session.requested_by ?? 'coach',
-    status: session.status ?? 'accepted',
-    responseNote: session.response_note ?? '',
   };
 }
 
@@ -709,15 +712,9 @@ export async function updateSession(
     durationMinutes: number;
     coacheeId: string;
     notes: string;
-    status: 'requested' | 'accepted' | 'proposed' | 'rejected';
-    responseNote: string;
   }>,
 ): Promise<CalendarSession> {
-  const body = {
-    ...toApiSessionPayload(patch),
-    ...(patch.status !== undefined ? { status: patch.status } : {}),
-    ...(patch.responseNote !== undefined ? { response_note: patch.responseNote } : {}),
-  };
+  const body = toApiSessionPayload(patch);
   const updated = await request<ApiSession>(`/api/sessions/${sessionId}/`, {
     method: 'PATCH',
     body: JSON.stringify(body),

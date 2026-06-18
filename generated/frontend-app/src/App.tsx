@@ -209,6 +209,7 @@ export default function App() {
             onCreatePlan={(data) => {
               void handleCreatePlan(data);
             }}
+            canCreatePlan={currentUser.role !== 'coachee'}
             loading={plansLoading}
             error={plansError}
           />
@@ -219,6 +220,7 @@ export default function App() {
             plan={selectedPlan}
             coachees={coachees}
             coaches={coaches}
+            currentUser={currentUser}
             onBack={() => setSelectedPlan(null)}
             onPlanUpdated={handlePlanUpdated}
           />

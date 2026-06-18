@@ -44,8 +44,6 @@ class SessionsSerializer(serializers.ModelSerializer):
             "notes",
             "mode",
             "requested_by",
-            "status",
-            "response_note",
             "owner",
             "created_at",
             "updated_at",

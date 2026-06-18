@@ -19,12 +19,13 @@ class PlanMessageSerializer(serializers.ModelSerializer):
 class CoachingPlanSerializer(serializers.ModelSerializer):
     actions = ActionSerializer(many=True, read_only=True)
     coachee_name = serializers.CharField(source="coachee.name", read_only=True, default=None)
+    coach_username = serializers.CharField(source="coach.username", read_only=True, default=None)
 
     class Meta:
         model = CoachingPlan
         fields = [
             "id", "title", "description", "goal", "status",
-            "target_date", "coachee", "coachee_name", "coach",
+            "target_date", "coachee", "coachee_name", "coach", "coach_username",
             "actions", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "coach", "created_at", "updated_at"]
@@ -33,8 +34,9 @@ class CoachingPlanSerializer(serializers.ModelSerializer):
 class CoachingPlanListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for the plan list view (no nested actions)."""
     coachee_name = serializers.CharField(source="coachee.name", read_only=True, default=None)
+    coach_username = serializers.CharField(source="coach.username", read_only=True, default=None)
 
     class Meta:
         model = CoachingPlan
-        fields = ["id", "title", "description", "goal", "status", "target_date", "coachee", "coachee_name", "created_at"]
+        fields = ["id", "title", "description", "goal", "status", "target_date", "coachee", "coachee_name", "coach_username", "created_at"]
         read_only_fields = ["id", "created_at"]

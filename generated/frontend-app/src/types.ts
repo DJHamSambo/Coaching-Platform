@@ -40,6 +40,7 @@ export interface CoachingPlan {
   targetDate: string;
   coacheeId: string | null;
   coacheeName: string | null;
+  coachUsername: string | null;
   createdAt: string;
 }
 

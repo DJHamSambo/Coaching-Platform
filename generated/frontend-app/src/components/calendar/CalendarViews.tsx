@@ -28,6 +28,14 @@ function toSafeTitle(value: string): string {
   return sanitizeInput(value, 255);
 }
 
+function getDurationStyle(durationMinutes: number): React.CSSProperties {
+  // Scale card height so longer sessions are visually larger in the calendar.
+  const minutes = Number.isFinite(durationMinutes) ? durationMinutes : 60;
+  const bounded = Math.max(30, Math.min(240, minutes));
+  const height = Math.round((bounded / 30) * 14 + 18);
+  return { minHeight: `${height}px` };
+}
+
 function SessionEntryButton({ session, onEditSession }: { session: CalendarSession; onEditSession: (session: CalendarSession) => void }) {
   const safeTitle = toSafeTitle(session.title || 'session');
   return (
@@ -37,9 +45,11 @@ function SessionEntryButton({ session, onEditSession }: { session: CalendarSessi
       className='calendar-event'
       onClick={() => onEditSession(session)}
       title={`Edit ${safeTitle}`}
+      style={getDurationStyle(session.durationMinutes)}
     >
       <span>{new Date(session.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-      <strong>{session.coacheeName || 'Coachee'}</strong>
+      <strong>{safeTitle}</strong>
+      <span>{session.durationMinutes} min</span>
     </button>
   );
 }
@@ -203,9 +213,11 @@ export function WeekCalendarView({
                       className='calendar-event week-entry'
                       onClick={() => onEditSession(session)}
                       title={`Edit ${toSafeTitle(session.title || 'session')}`}
+                      style={getDurationStyle(session.durationMinutes)}
                     >
-                      <strong>{session.coacheeName || 'Coachee'}</strong>
+                      <strong>{toSafeTitle(session.title || 'session')}</strong>
                       <span>{new Date(session.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span>{session.durationMinutes} min</span>
                     </button>
                   ))}
                 </div>

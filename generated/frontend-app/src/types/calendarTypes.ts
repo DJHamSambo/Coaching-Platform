@@ -7,8 +7,6 @@ export interface CalendarSession {
   coacheeName: string;
   notes: string;
   requestedBy: 'coach' | 'coachee';
-  status: 'requested' | 'accepted' | 'proposed' | 'rejected';
-  responseNote: string;
 }
 
 export interface WeeklyAvailabilityWindow {

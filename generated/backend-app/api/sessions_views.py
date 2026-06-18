@@ -15,6 +15,13 @@ from api.sessions_serializers import SessionsSerializer, WeeklyAvailabilityWindo
 from api.administration_serializers import CoachDirectorySerializer
 
 
+COACHEE_REQUEST_TITLES = {
+    "Goal Setting Session",
+    "Momentum Session",
+    "Ad hoc Coaching Session",
+}
+
+
 class CalendarPageNumberPagination(pagination.PageNumberPagination):
     page_size = getattr(settings, "CALENDAR_PAGE_SIZE", 100)
     page_size_query_param = "page_size"
@@ -78,6 +85,22 @@ def _validate_request_within_coach_availability(coach, start_at, duration_minute
         raise ValidationError({"date": "Requested time overlaps an unavailable period for the selected coach."})
 
 
+def _to_aware_datetime(value):
+    if value is None:
+        return None
+    if timezone.is_naive(value):
+        return timezone.make_aware(value, timezone.get_current_timezone())
+    return value
+
+
+def _validate_session_not_in_past(value):
+    session_at = _to_aware_datetime(value)
+    if session_at is None:
+        raise ValidationError({"date": "Session date/time is required."})
+    if session_at < timezone.now():
+        raise ValidationError({"date": "Session date/time cannot be in the past."})
+
+
 class CoachOwnedListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated, OwnsObjectPermission]
     pagination_class = CalendarPageNumberPagination
@@ -124,16 +147,20 @@ class SessionsListView(generics.ListCreateAPIView):
         return Session.objects.filter(owner=self.request.user).select_related("coachee").order_by("date")
 
     def perform_create(self, serializer):
+        start_at = serializer.validated_data.get("date")
+        _validate_session_not_in_past(start_at)
+
         if _is_coachee_user(self.request.user):
             coach, coachee_profile = _resolve_selected_coach_for_coachee(self.request)
-            start_at = serializer.validated_data.get("date")
             duration = serializer.validated_data.get("duration_minutes", 60)
+            title = serializer.validated_data.get("title", "")
+            if title not in COACHEE_REQUEST_TITLES:
+                raise ValidationError({"title": "Choose one of: Goal Setting Session, Momentum Session, Ad hoc Coaching Session."})
             _validate_request_within_coach_availability(coach, start_at, duration)
             created = serializer.save(
                 owner=coach,
                 coachee=coachee_profile,
                 requested_by="coachee",
-                status="requested",
             )
             Message.objects.create(
                 title=f"Session request from {self.request.user.username}: {created.title}",
@@ -145,12 +172,12 @@ class SessionsListView(generics.ListCreateAPIView):
             )
             return
 
-        serializer.save(owner=self.request.user, requested_by="coach", status=serializer.validated_data.get("status", "accepted"))
+        serializer.save(owner=self.request.user, requested_by="coach")
 
 
 class SessionsDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = SessionsSerializer
-    permission_classes = [permissions.IsAuthenticated, OwnsObjectPermission]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         if _is_coachee_user(self.request.user):
@@ -159,13 +186,42 @@ class SessionsDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_update(self, serializer):
         instance = self.get_object()
+        instance_date = _to_aware_datetime(instance.date)
+        if instance_date and instance_date < timezone.now():
+            raise ValidationError({"date": "Past sessions cannot be edited."})
+
+        next_date = serializer.validated_data.get("date", instance.date)
+        _validate_session_not_in_past(next_date)
+
+        if _is_coachee_user(self.request.user):
+            linked_ids = _linked_coachee_queryset(self.request.user).values_list("id", flat=True)
+            if instance.coachee_id not in linked_ids:
+                raise PermissionDenied("You cannot edit this session.")
+
+            title = serializer.validated_data.get("title", instance.title)
+            if title not in COACHEE_REQUEST_TITLES:
+                raise ValidationError({"title": "Choose one of: Goal Setting Session, Momentum Session, Ad hoc Coaching Session."})
+            serializer.save()
+            return
+
         if instance.owner_id != self.request.user.id:
-            raise PermissionDenied("Coachees cannot update sessions. Coaches review requests.")
+            raise PermissionDenied("You cannot edit this session.")
         serializer.save()
 
     def perform_destroy(self, instance):
+        instance_date = _to_aware_datetime(instance.date)
+        if instance_date and instance_date < timezone.now():
+            raise ValidationError({"date": "Past sessions cannot be cancelled."})
+
+        if _is_coachee_user(self.request.user):
+            linked_ids = _linked_coachee_queryset(self.request.user).values_list("id", flat=True)
+            if instance.coachee_id not in linked_ids:
+                raise PermissionDenied("You cannot cancel this session.")
+            instance.delete()
+            return
+
         if instance.owner_id != self.request.user.id:
-            raise PermissionDenied("Coachees cannot delete sessions.")
+            raise PermissionDenied("You cannot cancel this session.")
         instance.delete()
 
 
