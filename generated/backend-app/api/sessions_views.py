@@ -29,10 +29,10 @@ class CalendarPageNumberPagination(pagination.PageNumberPagination):
 
 
 def _coachee_identity_filter(user) -> Q:
-    lookup = Q(user=user) | Q(name__iexact=user.username)
-    if user.email:
-        lookup |= Q(email__iexact=user.email)
-    return lookup
+    # Prefer FK link; fall back only for legacy coachees without a linked user
+    by_user = Q(user=user)
+    legacy = Q(user__isnull=True, name__iexact=user.username)
+    return by_user | legacy
 
 
 def _linked_coachee_queryset(user):

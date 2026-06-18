@@ -17,21 +17,21 @@ def _resolve_owner(request) -> User:
 def _is_coachee_user(user) -> bool:
     if not user or not getattr(user, "is_authenticated", False):
         return False
-
-    lookup = Q(user=user) | Q(name__iexact=user.username)
-    if user.email:
-        lookup |= Q(email__iexact=user.email)
-    return Coachee.objects.filter(lookup).exists()
+    # Prefer FK link; fall back only for legacy coachees without a linked user
+    return (
+        Coachee.objects.filter(user=user).exists()
+        or Coachee.objects.filter(user__isnull=True, name__iexact=user.username).exists()
+    )
 
 
 def _linked_coachee_profiles(user):
     if not user or not getattr(user, "is_authenticated", False):
         return Coachee.objects.none()
-
-    lookup = Q(user=user) | Q(name__iexact=user.username)
-    if user.email:
-        lookup |= Q(email__iexact=user.email)
-    return Coachee.objects.filter(lookup)
+    # Prefer FK link; fall back only for legacy coachees without a linked user
+    by_user = Coachee.objects.filter(user=user)
+    if by_user.exists():
+        return by_user
+    return Coachee.objects.filter(user__isnull=True, name__iexact=user.username)
 
 
 def _validate_action_assignee(request, plan, assignee_name):

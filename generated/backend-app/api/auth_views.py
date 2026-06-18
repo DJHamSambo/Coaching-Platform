@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from django.contrib.auth.models import User
-from django.db.models import Q
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -31,9 +30,11 @@ def register(request: Request) -> Response:
 @permission_classes([IsAuthenticated])
 def me(request: Request) -> Response:
     user = request.user
-    has_coachee_profile = Coachee.objects.filter(
-        Q(user=user) | Q(name__iexact=user.username) | Q(email__iexact=user.email)
-    ).exists()
+    # Prefer FK link; only fall back to name for legacy coachees with no linked user account
+    has_coachee_profile = (
+        Coachee.objects.filter(user=user).exists()
+        or Coachee.objects.filter(user__isnull=True, name__iexact=user.username).exists()
+    )
 
     role = "admin" if user.is_staff else ("coachee" if has_coachee_profile else "coach")
     return Response({
