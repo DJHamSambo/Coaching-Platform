@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.db.models import Q
-from api.models import Session, WeeklyAvailabilityWindow, UnavailablePeriod
+from api.models import Session, WeeklyAvailabilityWindow, UnavailablePeriod, CoachingPlan
 from api.serializers_utils import validate_ordered_range
 
 
@@ -31,6 +31,7 @@ def _resolve_actor_for_overlap_check(serializer: serializers.Serializer):
 
 class SessionsSerializer(serializers.ModelSerializer):
     coachee_name = serializers.SerializerMethodField()
+    coaching_plan_title = serializers.SerializerMethodField()
 
     class Meta:
         model = Session
@@ -41,6 +42,8 @@ class SessionsSerializer(serializers.ModelSerializer):
             "duration_minutes",
             "coachee",
             "coachee_name",
+            "coaching_plan",
+            "coaching_plan_title",
             "notes",
             "mode",
             "requested_by",
@@ -48,10 +51,13 @@ class SessionsSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ("id", "owner", "created_at", "updated_at", "coachee_name", "requested_by")
+        read_only_fields = ("id", "owner", "created_at", "updated_at", "coachee_name", "coaching_plan_title", "requested_by")
 
     def get_coachee_name(self, obj):
         return obj.coachee.name if obj.coachee else ""
+
+    def get_coaching_plan_title(self, obj):
+        return obj.coaching_plan.title if obj.coaching_plan else None
 
 
 class WeeklyAvailabilityWindowSerializer(serializers.ModelSerializer):

@@ -5,6 +5,8 @@ export interface CalendarSession {
   durationMinutes: number;
   coacheeId: string | null;
   coacheeName: string;
+  coachingPlanId: string | null;
+  coachingPlanTitle: string | null;
   notes: string;
   requestedBy: 'coach' | 'coachee';
 }

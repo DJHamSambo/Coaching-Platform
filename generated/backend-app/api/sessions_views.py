@@ -9,7 +9,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import Coachee, Message, Session, WeeklyAvailabilityWindow, UnavailablePeriod
+from api.models import Coachee, CoachingPlan, Message, Session, WeeklyAvailabilityWindow, UnavailablePeriod
 from api.permissions import OwnsObjectPermission
 from api.sessions_serializers import SessionsSerializer, WeeklyAvailabilityWindowSerializer, UnavailablePeriodSerializer
 from api.administration_serializers import CoachDirectorySerializer
@@ -101,6 +101,29 @@ def _validate_session_not_in_past(value):
         raise ValidationError({"date": "Session date/time cannot be in the past."})
 
 
+def _resolve_coaching_plan(request, coachee_obj_or_id):
+    """Resolve and validate the optional coaching_plan_id from the request."""
+    plan_id_raw = request.data.get("coaching_plan_id") or request.data.get("coaching_plan")
+    if not plan_id_raw:
+        return None
+    try:
+        plan_id = int(plan_id_raw)
+    except (TypeError, ValueError):
+        raise ValidationError({"coaching_plan_id": "coaching_plan_id must be an integer."})
+
+    plan = CoachingPlan.objects.filter(pk=plan_id, status__in=["todo", "in_progress"]).first()
+    if not plan:
+        raise ValidationError({"coaching_plan_id": "Coaching plan not found or not in an active status."})
+
+    # Verify the plan belongs to the relevant coachee
+    if coachee_obj_or_id is not None:
+        coachee_id = coachee_obj_or_id.pk if hasattr(coachee_obj_or_id, "pk") else (coachee_obj_or_id.id if hasattr(coachee_obj_or_id, "id") else None)
+        if coachee_id and plan.coachee_id != coachee_id:
+            raise ValidationError({"coaching_plan_id": "Coaching plan does not belong to the selected coachee."})
+
+    return plan
+
+
 class CoachOwnedListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated, OwnsObjectPermission]
     pagination_class = CalendarPageNumberPagination
@@ -143,8 +166,17 @@ class SessionsListView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         if _is_coachee_user(self.request.user):
-            return Session.objects.filter(coachee__in=_linked_coachee_queryset(self.request.user)).select_related("coachee", "owner").order_by("date")
-        return Session.objects.filter(owner=self.request.user).select_related("coachee").order_by("date")
+            qs = Session.objects.filter(coachee__in=_linked_coachee_queryset(self.request.user)).select_related("coachee", "owner", "coaching_plan").order_by("date")
+        else:
+            qs = Session.objects.filter(owner=self.request.user).select_related("coachee", "coaching_plan").order_by("date")
+
+        plan_id = self.request.query_params.get("coaching_plan_id")
+        if plan_id:
+            try:
+                qs = qs.filter(coaching_plan_id=int(plan_id))
+            except (TypeError, ValueError):
+                pass
+        return qs
 
     def perform_create(self, serializer):
         start_at = serializer.validated_data.get("date")
@@ -157,10 +189,12 @@ class SessionsListView(generics.ListCreateAPIView):
             if title not in COACHEE_REQUEST_TITLES:
                 raise ValidationError({"title": "Choose one of: Goal Setting Session, Momentum Session, Ad hoc Coaching Session."})
             _validate_request_within_coach_availability(coach, start_at, duration)
+            coaching_plan = _resolve_coaching_plan(self.request, coachee_profile)
             created = serializer.save(
                 owner=coach,
                 coachee=coachee_profile,
                 requested_by="coachee",
+                coaching_plan=coaching_plan,
             )
             Message.objects.create(
                 title=f"Session request from {self.request.user.username}: {created.title}",
@@ -172,7 +206,10 @@ class SessionsListView(generics.ListCreateAPIView):
             )
             return
 
-        serializer.save(owner=self.request.user, requested_by="coach")
+        # Coach creating session
+        coachee_id = serializer.validated_data.get("coachee")
+        coaching_plan = _resolve_coaching_plan(self.request, coachee_id)
+        serializer.save(owner=self.request.user, requested_by="coach", coaching_plan=coaching_plan)
 
 
 class SessionsDetailView(generics.RetrieveUpdateDestroyAPIView):

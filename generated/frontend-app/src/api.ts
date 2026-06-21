@@ -639,6 +639,8 @@ interface ApiSession {
   duration_minutes: number;
   coachee: number | null;
   coachee_name: string;
+  coaching_plan: number | null;
+  coaching_plan_title: string | null;
   notes: string;
   requested_by: 'coach' | 'coachee';
 }
@@ -657,6 +659,8 @@ function toCalendarSession(session: ApiSession): CalendarSession {
     durationMinutes: session.duration_minutes,
     coacheeId: session.coachee ? String(session.coachee) : null,
     coacheeName: session.coachee_name ?? '',
+    coachingPlanId: session.coaching_plan ? String(session.coaching_plan) : null,
+    coachingPlanTitle: session.coaching_plan_title ?? null,
     notes: session.notes ?? '',
     requestedBy: session.requested_by ?? 'coach',
   };
@@ -667,11 +671,17 @@ export async function listSessions(): Promise<CalendarSession[]> {
   return toListResults(sessions).map(toCalendarSession);
 }
 
+export async function listSessionsForPlan(planId: string): Promise<CalendarSession[]> {
+  const sessions = await request<ApiSession[] | ApiListResponse<ApiSession>>(`/api/sessions/?coaching_plan_id=${planId}`);
+  return toListResults(sessions).map(toCalendarSession);
+}
+
 function toApiSessionPayload(payload: {
   title?: string;
   date?: string;
   durationMinutes?: number;
   coacheeId?: string;
+  coachingPlanId?: string | null;
   notes?: string;
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {};
@@ -679,6 +689,7 @@ function toApiSessionPayload(payload: {
   if (payload.date !== undefined) body.date = payload.date;
   if (payload.durationMinutes !== undefined) body.duration_minutes = payload.durationMinutes;
   if (payload.coacheeId !== undefined) body.coachee = payload.coacheeId ? Number(payload.coacheeId) : null;
+  if (payload.coachingPlanId !== undefined) body.coaching_plan_id = payload.coachingPlanId ? Number(payload.coachingPlanId) : null;
   if (payload.notes !== undefined) body.notes = payload.notes;
   return body;
 }
@@ -689,6 +700,7 @@ export async function createSession(payload: {
   durationMinutes: number;
   coacheeId?: string;
   coachId?: string;
+  coachingPlanId?: string | null;
   notes?: string;
   requestedBy?: 'coach' | 'coachee';
 }): Promise<CalendarSession> {

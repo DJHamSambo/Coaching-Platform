@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createAction, createDiscussion, getCurrentUsername, getPlan, listActions, listDiscussions, updateAction, updateActionStatus, updatePlan } from '../api';
-import type { AdminCoach, AdminCoachee, CoachingPlan, CurrentUser, DiscussionItem, PlanAction, TaskStatus } from '../types';
+import { createAction, createDiscussion, getCurrentUsername, getPlan, listActions, listDiscussions, listSessionsForPlan, updateAction, updateActionStatus, updatePlan, updateSession } from '../api';
+import type { AdminCoach, AdminCoachee, CalendarSession, CoachingPlan, CurrentUser, DiscussionItem, PlanAction, TaskStatus } from '../types';
+import { toLocalDateTimeInputValue } from './calendar/calendarUtils';
 
 interface PlanDetailProps {
   plan: CoachingPlan;
@@ -35,6 +36,14 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
   const [planStatus, setPlanStatus] = useState(plan.status);
   const [planCoacheeId, setPlanCoacheeId] = useState(plan.coacheeId ?? '');
   const [addingAction, setAddingAction] = useState(false);
+
+  // Sessions linked to this plan
+  const [planSessions, setPlanSessions] = useState<CalendarSession[]>([]);
+  const [editingSession, setEditingSession] = useState<CalendarSession | null>(null);
+  const [sessionEditDate, setSessionEditDate] = useState('');
+  const [sessionEditDuration, setSessionEditDuration] = useState(60);
+  const [sessionEditNotes, setSessionEditNotes] = useState('');
+  const [sessionEditError, setSessionEditError] = useState<string | null>(null);
 
   const [planDiscussionText, setPlanDiscussionText] = useState('');
   const [actionDiscussionText, setActionDiscussionText] = useState('');
@@ -121,7 +130,12 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
     };
   }, [plan.id]);
 
-  // Sync local status when plan prop changes
+  // Fetch sessions linked to this plan
+  useEffect(() => {
+    listSessionsForPlan(plan.id)
+      .then(setPlanSessions)
+      .catch(() => { /* non-critical */ });
+  }, [plan.id]);
   useEffect(() => {
     setPlanStatus(plan.status);
     setPlanTitle(plan.title);
@@ -216,6 +230,31 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
       setError(null);
     } catch {
       setError('Could not update plan status.');
+    }
+  }
+
+  function openSessionEdit(session: CalendarSession): void {
+    setEditingSession(session);
+    setSessionEditDate(toLocalDateTimeInputValue(session.date));
+    setSessionEditDuration(session.durationMinutes);
+    setSessionEditNotes(session.notes);
+    setSessionEditError(null);
+  }
+
+  async function handleSaveSessionEdit(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!editingSession) return;
+    try {
+      const updated = await updateSession(editingSession.id, {
+        date: sessionEditDate,
+        durationMinutes: sessionEditDuration,
+        notes: sessionEditNotes,
+      });
+      setPlanSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      setEditingSession(null);
+      setSessionEditError(null);
+    } catch (err) {
+      setSessionEditError(err instanceof Error ? err.message : 'Could not update session.');
     }
   }
 
@@ -417,6 +456,51 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
           ))}
         </div>
       )}
+
+      {/* Sessions linked to this plan */}
+      <div className='card' style={{ marginTop: 20 }}>
+        <h3>Sessions</h3>
+        {planSessions.length === 0 ? (
+          <p className='muted'>No sessions linked to this plan yet.</p>
+        ) : (
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {planSessions.map((session) => {
+              const isUpcoming = new Date(session.date).getTime() > Date.now();
+              return (
+                <li
+                  key={session.id}
+                  className='card'
+                  style={{ marginBottom: 8, cursor: isUpcoming ? 'pointer' : 'default', opacity: isUpcoming ? 1 : 0.7 }}
+                  onClick={() => { if (isUpcoming) openSessionEdit(session); }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                    <strong>{session.title}</strong>
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        padding: '2px 8px',
+                        borderRadius: 12,
+                        fontSize: 12,
+                        fontWeight: 500,
+                        background: isUpcoming ? '#dcfce7' : '#f1f5f9',
+                        color: isUpcoming ? '#166534' : '#475569',
+                      }}
+                    >
+                      {isUpcoming ? 'Upcoming' : 'Past'}
+                    </span>
+                  </div>
+                  <span className='muted' style={{ fontSize: 13 }}>
+                    {new Date(session.date).toLocaleString()} · {session.durationMinutes} min
+                    {session.coacheeName ? ` · ${session.coacheeName}` : ''}
+                  </span>
+                  {session.notes && <p className='muted' style={{ fontSize: 13, marginTop: 4 }}>{session.notes}</p>}
+                  {isUpcoming && <p className='muted' style={{ fontSize: 12, marginTop: 4 }}>Click to edit</p>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
 
       {/* Plan discussions (localized to this plan) */}
       <div className='card' style={{ marginTop: 20 }}>
@@ -623,6 +707,56 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
               <button type='button' className='primary' onClick={() => void handleSaveAction()}>Save action</button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* Session edit modal */}
+      {editingSession && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', display: 'grid', placeItems: 'center', zIndex: 60 }}>
+          <div className='card' style={{ width: 'min(500px, 94vw)', maxHeight: '90vh', overflowY: 'auto', position: 'relative' }}>
+            <button
+              type='button'
+              aria-label='Close session editor'
+              onClick={() => setEditingSession(null)}
+              style={{ position: 'absolute', top: 8, right: 8, border: 'none', background: 'none', fontSize: 20, lineHeight: 1, cursor: 'pointer', color: '#475569' }}
+            >
+              x
+            </button>
+            <h3>Edit session</h3>
+            <p className='muted' style={{ marginBottom: 12 }}>{editingSession.title}</p>
+            {sessionEditError && <p style={{ color: '#9f1239', marginBottom: 8 }}>{sessionEditError}</p>}
+            <form onSubmit={(event) => void handleSaveSessionEdit(event)}>
+              <label>
+                Date and time
+                <input
+                  type='datetime-local'
+                  value={sessionEditDate}
+                  onChange={(event) => setSessionEditDate(event.target.value)}
+                />
+              </label>
+              <label>
+                Duration (minutes)
+                <input
+                  type='number'
+                  min={15}
+                  step={15}
+                  value={sessionEditDuration}
+                  onChange={(event) => setSessionEditDuration(Number(event.target.value) || 60)}
+                />
+              </label>
+              <label>
+                Notes
+                <textarea
+                  rows={3}
+                  value={sessionEditNotes}
+                  onChange={(event) => setSessionEditNotes(event.target.value)}
+                />
+              </label>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button type='submit' className='primary'>Save changes</button>
+                <button type='button' onClick={() => setEditingSession(null)}>Cancel</button>
+              </div>
+            </form>
           </div>
         </div>
       )}

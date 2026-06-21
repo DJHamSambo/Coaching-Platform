@@ -20,6 +20,9 @@ const MODULES = [
 type ModuleKey = (typeof MODULES)[number]['key'];
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
   const enabledModules = useMemo(() => 
     MODULES.filter((item) => {
       // Hide administration from coachees
@@ -29,9 +32,6 @@ export default function App() {
       return item.enabled;
     }), [currentUser?.role]);
   const [activeModule, setActiveModule] = useState<ModuleKey>(enabledModules[0]?.key ?? 'plans');
-
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
 
   const [plans, setPlans] = useState<CoachingPlan[]>([]);
   const [plansLoading, setPlansLoading] = useState(true);
