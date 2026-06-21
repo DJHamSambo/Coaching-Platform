@@ -8,12 +8,13 @@ import {
   deleteUnavailablePeriod,
   listAvailabilityWindows,
   listMyCalendarCoaches,
+  listPlans,
   listSessions,
   listUnavailablePeriods,
   updateUnavailablePeriod,
   updateSession,
 } from '../api';
-import type { AdminCoachee, AdminCoach, CalendarSession, CurrentUser, UnavailablePeriod, WeeklyAvailabilityWindow } from '../types';
+import type { AdminCoachee, AdminCoach, CalendarSession, CoachingPlan, CurrentUser, UnavailablePeriod, WeeklyAvailabilityWindow } from '../types';
 import { MonthCalendarView, WeekCalendarView, YearCalendarView } from './calendar/CalendarViews';
 import { formatHourLabel, toDateInputValue, toDateKey, toLocalDateTimeInputValue, WEEKDAY_LABELS } from './calendar/calendarUtils';
 
@@ -37,6 +38,7 @@ interface SessionFormState {
   date: string;
   durationMinutes: number;
   coacheeId: string;
+  planId: string;
   notes: string;
 }
 
@@ -53,6 +55,7 @@ const EMPTY_SESSION_FORM: SessionFormState = {
   date: '',
   durationMinutes: getDefaultDurationForRequestType(REQUEST_SESSION_TYPES[0]),
   coacheeId: '',
+  planId: '',
   notes: '',
 };
 
@@ -135,10 +138,27 @@ export function CalendarPanel({ coachees, currentUser }: CalendarPanelProps) {
 
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [sessionForm, setSessionForm] = useState<SessionFormState>(EMPTY_SESSION_FORM);
+  const [allPlans, setAllPlans] = useState<CoachingPlan[]>([]);
   const [showUnavailableModal, setShowUnavailableModal] = useState(false);
   const [unavailableEditForm, setUnavailableEditForm] = useState<UnavailableFormState>(EMPTY_UNAVAILABLE_EDIT_FORM);
 
   const [availabilityForm, setAvailabilityForm] = useState({ weekdays: [0], startTime: '09:00', endTime: '17:00' });
+
+  // Fetch all plans once; filter in the form based on selected coachee + active statuses
+  useEffect(() => {
+    listPlans().then(setAllPlans).catch(() => { /* non-critical */ });
+  }, []);
+
+  // Plans eligible for the current session form: todo or in_progress, matching selected coachee
+  const eligiblePlans = useMemo(() => {
+    return allPlans.filter((plan) => {
+      if (plan.status !== 'todo' && plan.status !== 'inProgress') return false;
+      if (!isCoachee && sessionForm.coacheeId) {
+        return plan.coacheeId === sessionForm.coacheeId;
+      }
+      return true;
+    });
+  }, [allPlans, sessionForm.coacheeId, isCoachee]);
 
   function toggleAvailabilityDay(weekday: number): void {
     setAvailabilityForm((prev) => {
@@ -544,6 +564,7 @@ export function CalendarPanel({ coachees, currentUser }: CalendarPanelProps) {
       date: localDate,
       durationMinutes: session.durationMinutes,
       coacheeId: session.coacheeId ?? '',
+      planId: session.coachingPlanId ?? '',
       notes: session.notes,
     });
     setShowSessionModal(true);
@@ -610,6 +631,7 @@ export function CalendarPanel({ coachees, currentUser }: CalendarPanelProps) {
           durationMinutes: sessionForm.durationMinutes,
           coacheeId: isCoachee ? undefined : sessionForm.coacheeId,
           coachId: isCoachee ? selectedCoachId : undefined,
+          coachingPlanId: sessionForm.planId || null,
           requestedBy: isCoachee ? 'coachee' : 'coach',
           notes: sessionForm.notes,
         });
@@ -1078,7 +1100,10 @@ export function CalendarPanel({ coachees, currentUser }: CalendarPanelProps) {
               {!isCoachee ? (
                 <label>
                   Coachee
-                  <select value={sessionForm.coacheeId} onChange={(event) => setSessionForm((prev) => ({ ...prev, coacheeId: event.target.value }))}>
+                  <select
+                    value={sessionForm.coacheeId}
+                    onChange={(event) => setSessionForm((prev) => ({ ...prev, coacheeId: event.target.value, planId: '' }))}
+                  >
                     <option value=''>Select coachee</option>
                     {coachees.map((coachee) => (
                       <option key={coachee.id} value={coachee.id}>{coachee.name}</option>
@@ -1096,6 +1121,19 @@ export function CalendarPanel({ coachees, currentUser }: CalendarPanelProps) {
                   </select>
                 </label>
               )}
+              <label>
+                Coaching plan
+                <select
+                  value={sessionForm.planId}
+                  onChange={(event) => setSessionForm((prev) => ({ ...prev, planId: event.target.value }))}
+                  disabled={!isCoachee && !sessionForm.coacheeId}
+                >
+                  <option value=''>None</option>
+                  {eligiblePlans.map((plan) => (
+                    <option key={plan.id} value={plan.id}>{plan.title}</option>
+                  ))}
+                </select>
+              </label>
               <label>
                 Notes
                 <textarea

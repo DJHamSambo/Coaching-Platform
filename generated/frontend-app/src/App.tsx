@@ -20,11 +20,18 @@ const MODULES = [
 type ModuleKey = (typeof MODULES)[number]['key'];
 
 export default function App() {
-  const enabledModules = useMemo(() => MODULES.filter((item) => item.enabled), []);
-  const [activeModule, setActiveModule] = useState<ModuleKey>(enabledModules[0]?.key ?? 'plans');
-
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+
+  const enabledModules = useMemo(() => 
+    MODULES.filter((item) => {
+      // Hide administration from coachees
+      if (item.key === 'administration' && currentUser?.role === 'coachee') {
+        return false;
+      }
+      return item.enabled;
+    }), [currentUser?.role]);
+  const [activeModule, setActiveModule] = useState<ModuleKey>(enabledModules[0]?.key ?? 'plans');
 
   const [plans, setPlans] = useState<CoachingPlan[]>([]);
   const [plansLoading, setPlansLoading] = useState(true);

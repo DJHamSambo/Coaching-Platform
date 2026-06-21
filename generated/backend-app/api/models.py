@@ -84,6 +84,7 @@ class Session(models.Model):
     date = models.DateTimeField(null=True, blank=True)
     duration_minutes = models.PositiveIntegerField(default=60)
     coachee = models.ForeignKey(Coachee, on_delete=models.SET_NULL, null=True, blank=True, related_name="coachee_sessions")
+    coaching_plan = models.ForeignKey("CoachingPlan", on_delete=models.SET_NULL, null=True, blank=True, related_name="sessions")
     notes = models.TextField(blank=True, default="")
     mode = models.CharField(max_length=20, choices=MODE_CHOICES, default="video")
     requested_by = models.CharField(max_length=100, default="coachee")
