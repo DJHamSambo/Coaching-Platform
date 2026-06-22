@@ -261,13 +261,18 @@ class GitFlowAgent:
             raise ValueError("git args must not be empty")
         if any("\n" in part or "\r" in part or "\x00" in part for part in args):
             raise ValueError("git args contain disallowed control characters")
-        # Pre-seed answers to avoid blocking prompts on Windows branch-ref cleanup.
+        # Pre-seed answers to avoid blocking on Windows branch-ref cleanup.
+        # Deleting the last branch in a refs/heads/<dir>/ subdirectory makes git
+        # try to remove the now-empty directory, and on Windows (especially when
+        # OneDrive briefly locks .git files) this can prompt
+        # "Deletion of directory ... failed. Should I try again? (y/n)" multiple
+        # times. A single answer leaves later prompts blocking, so feed several.
         return subprocess.run(
             ["git", "-C", str(self.repo_path), *args],
             check=check,
             capture_output=capture_output,
             text=True,
-            input="n\n",
+            input="n\n" * 16,
         )
 
     def _run_command(self, args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -491,6 +496,16 @@ class GitFlowAgent:
                 result = self._run_git(command[3:], check=False, capture_output=True)
                 if result.returncode != 0:
                     _logger.warning("Local branch cleanup skipped for %s: %s", feature_branch, (result.stderr or "").strip())
+                # On Windows the ref file may be momentarily locked (e.g. OneDrive),
+                # leaving the branch behind even after a non-zero/prompted delete.
+                # Fall back to a direct ref delete so cleanup is reliable.
+                if _local_branch_exists(self.repo_path, feature_branch):
+                    self._run_git(
+                        ["update-ref", "-d", f"refs/heads/{feature_branch}"],
+                        check=False, capture_output=True,
+                    )
+                    if _local_branch_exists(self.repo_path, feature_branch):
+                        _logger.warning("Local branch %s could not be deleted; remove it manually.", feature_branch)
 
             for command in remote_commands:
                 result = self._run_git(command[3:], check=False, capture_output=True)
@@ -501,11 +516,33 @@ class GitFlowAgent:
                     else:
                         _logger.warning("Remote branch cleanup skipped for %s: %s", feature_branch, (result.stderr or "").strip())
 
+            # Remove now-empty refs/heads/<dir> directories left behind by the
+            # delete so future cleanups don't trigger the Windows prompt.
+            self._prune_empty_ref_dirs()
+
         return BranchCleanupPlan(
             feature_branch=feature_branch,
             local_commands=local_commands,
             remote_commands=remote_commands,
         )
+
+    def _prune_empty_ref_dirs(self) -> None:
+        """Remove empty subdirectories under .git/refs/heads and logs/refs/heads.
+
+        Deleting the last branch in a namespaced directory (e.g. ``feature/``)
+        leaves an empty directory that, on Windows, git later prompts about. We
+        proactively remove them, ignoring any that are missing or still in use.
+        """
+        git_dir = self.repo_path / ".git"
+        for base in (git_dir / "refs" / "heads", git_dir / "logs" / "refs" / "heads"):
+            if not base.is_dir():
+                continue
+            for sub in sorted(base.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+                if sub.is_dir():
+                    try:
+                        sub.rmdir()  # only succeeds when empty
+                    except OSError:
+                        pass
 
     # ------------------------------------------------------------------
     # Code review CI gate
