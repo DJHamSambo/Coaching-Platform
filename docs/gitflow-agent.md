@@ -22,12 +22,27 @@
 
 ## Usage
 
+Create a feature branch with staged changes (default mode):
+
 ```bash
 python agents/gitflow_agent.py \
   --repo . \
   --feature "requirements-agent" \
   --commit-message "feat: add requirements agent" \
-  --summary "Add the requirements distillation agent and its documentation."
+  --summary "Add the requirements distillation agent and its documentation." \
+  --execute
+```
+
+Or with the explicit (now deprecated) `--create-feature` flag:
+
+```bash
+python agents/gitflow_agent.py \
+  --repo . \
+  --feature "requirements-agent" \
+  --commit-message "feat: add requirements agent" \
+  --summary "Add the requirements distillation agent and its documentation." \
+  --create-feature \
+  --execute
 ```
 
 Merge a reviewed feature into `main` and clean up the feature branch:
@@ -75,6 +90,8 @@ Auto-implement options:
 
 ## Notes
 
+- **Feature branch creation is the default mode** when no action flag (`--merge-feature-into-main`, `--cleanup-feature-branch`, `--run-ci`) is specified.
+- Passing `--create-feature` is deprecated but still accepted for backward compatibility; it does not change the default behavior.
 - The default mode is a safe dry run.
 - Passing `--execute` runs the git commands directly.
 - The mainline branch is configurable through `--main-branch` (default: `main`).
