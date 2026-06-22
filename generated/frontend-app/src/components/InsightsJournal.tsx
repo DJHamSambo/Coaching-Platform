@@ -145,21 +145,23 @@ export function InsightsJournal({
                   <div className='muted' style={{ marginTop: 4 }}>
                     Last updated: {formatTimestamp(insight.updatedAt ?? insight.createdAt)}
                   </div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                    <button
-                      type='button'
-                      onClick={() => {
-                        setEditingId(insight.id);
-                        setEditNote(insight.note);
-                        setEditCoachee(insight.coacheeId || null);
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button type='button' onClick={() => onDeleteInsight(insight.id)}>
-                      Delete
-                    </button>
-                  </div>
+                  {insight.author === currentUsername && (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          setEditingId(insight.id);
+                          setEditNote(insight.note);
+                          setEditCoachee(insight.coacheeId || null);
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button type='button' onClick={() => onDeleteInsight(insight.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </>
               )}
             </li>

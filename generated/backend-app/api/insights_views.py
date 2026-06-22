@@ -1,4 +1,5 @@
 from rest_framework import generics, permissions
+from rest_framework.exceptions import PermissionDenied
 from django.db.models import Q
 from api.insights_serializers import InsightsSerializer
 from api.models import Coachee
@@ -47,3 +48,16 @@ class InsightsDetailView(generics.RetrieveUpdateDestroyAPIView):
         else:
             # Coaches can only access their own insights
             return self.serializer_class.Meta.model.objects.filter(owner=user)
+
+    def perform_update(self, serializer):
+        # Only allow users to edit insights they created
+        if serializer.instance.owner != self.request.user:
+            raise PermissionDenied("You can only edit insights you created.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        # Only allow users to delete insights they created
+        if instance.owner != self.request.user:
+            raise PermissionDenied("You can only delete insights you created.")
+        instance.delete()
+        instance.delete()
