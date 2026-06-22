@@ -9,6 +9,7 @@ import type {
   CoachingPlan,
   CurrentUser,
   DiscussionItem,
+  InsightItem,
   PlanAction,
   PlanStatus,
   PlanTask,
@@ -314,6 +315,67 @@ export async function createDiscussion(payload: { planId: string; taskId?: strin
     }),
   });
   return toDiscussionItem(created);
+}
+
+interface ApiInsight {
+  id: number;
+  title: string;
+  author: string;
+  created_at: string;
+  updated_at: string;
+  coachee: number | null;
+  coachee_name: string | null;
+}
+
+function toInsightItem(insight: ApiInsight): InsightItem {
+  return {
+    id: String(insight.id),
+    author: insight.author,
+    note: insight.title,
+    createdAt: insight.created_at,
+    updatedAt: insight.updated_at,
+    coacheeId: insight.coachee ? String(insight.coachee) : null,
+    coacheeName: insight.coachee_name,
+  };
+}
+
+export async function listInsights(coacheeId?: string | null): Promise<InsightItem[]> {
+  let url = '/api/insights/';
+  if (coacheeId) {
+    url += `?coachee_id=${coacheeId}`;
+  }
+  const insights = await request<ApiInsight[] | ApiListResponse<ApiInsight>>(url);
+  return toListResults(insights)
+    .map(toInsightItem)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function createInsight(payload: { author: string; note: string; coacheeId?: string | null }): Promise<InsightItem> {
+  const created = await request<ApiInsight>('/api/insights/', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: payload.note,
+      author: payload.author,
+      coachee: payload.coacheeId ? Number(payload.coacheeId) : null,
+    }),
+  });
+  return toInsightItem(created);
+}
+
+export async function updateInsight(insightId: string, payload: { author?: string; note?: string; coacheeId?: string | null }): Promise<InsightItem> {
+  const body: Record<string, unknown> = {};
+  if (payload.author !== undefined) body.author = payload.author;
+  if (payload.note !== undefined) body.title = payload.note;
+  if (payload.coacheeId !== undefined) body.coachee = payload.coacheeId ? Number(payload.coacheeId) : null;
+  const updated = await request<ApiInsight>(`/api/insights/${insightId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+  return toInsightItem(updated);
+}
+
+export async function deleteInsight(insightId: string): Promise<void> {
+  await request<void>(`/api/insights/${insightId}/`, { method: 'DELETE' });
 }
 
 // ---------------------------------------------------------------------------

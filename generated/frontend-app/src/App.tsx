@@ -3,16 +3,30 @@ import { PlanList } from './components/PlanList';
 import { PlanDetail } from './components/PlanDetail';
 import { CalendarPanel } from './components/CalendarPanel';
 import { AdministrationPanel } from './components/AdministrationPanel';
+import { InsightsJournal } from './components/InsightsJournal';
 import { LoginScreen } from './components/LoginScreen';
-import { clearToken, createPlan, getMe, getToken, listAdminCoachees, listCoachDirectory, listPlans } from './api';
+import {
+  clearToken,
+  createInsight,
+  createPlan,
+  deleteInsight,
+  getMe,
+  getToken,
+  listAdminCoachees,
+  listCoachDirectory,
+  listInsights,
+  listPlans,
+  updateInsight,
+} from './api';
 import { SESSION_EXPIRED_MESSAGE } from './constants/messages';
 import { requirementTitle } from './data/seed';
-import type { AdminCoachee, AdminCoach, CoachingPlan, CurrentUser } from './types';
+import type { AdminCoachee, AdminCoach, CoachingPlan, CurrentUser, InsightItem } from './types';
 
 const CALENDAR_FEATURE_ENABLED = import.meta.env.VITE_ENABLE_CALENDAR !== 'false';
 
 const MODULES = [
   { key: 'plans', label: 'Coaching Plans', enabled: true },
+  { key: 'insights', label: 'Insights', enabled: true },
   { key: 'calendar', label: 'Calendar', enabled: CALENDAR_FEATURE_ENABLED },
   { key: 'administration', label: 'Administration', enabled: true },
 ] as const;
@@ -42,6 +56,11 @@ export default function App() {
   const [coaches, setCoaches] = useState<AdminCoach[]>([]);
   const [coacheesLoading, setCoacheesLoading] = useState(true);
   const [coacheesError, setCoacheesError] = useState<string | null>(null);
+
+  const [insights, setInsights] = useState<InsightItem[]>([]);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
+  const [selectedInsightCoachee, setSelectedInsightCoachee] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +99,7 @@ export default function App() {
       clearToken();
       setCurrentUser(null);
       setSelectedPlan(null);
+      setSelectedInsightCoachee(null);
       setActiveModule('plans');
       setPlansError(SESSION_EXPIRED_MESSAGE);
     }
@@ -111,6 +131,28 @@ export default function App() {
       cancelled = true;
     };
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || activeModule !== 'insights') return;
+    let cancelled = false;
+    setInsightsLoading(true);
+    listInsights(currentUser.role === 'coach' ? selectedInsightCoachee : null)
+      .then((items) => {
+        if (!cancelled) {
+          setInsights(items);
+          setInsightsError(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setInsightsError('Could not load insights.');
+      })
+      .finally(() => {
+        if (!cancelled) setInsightsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeModule, currentUser, selectedInsightCoachee]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -150,6 +192,36 @@ export default function App() {
     setSelectedPlan(updated);
   }
 
+  async function handleAddInsight(insight: InsightItem): Promise<void> {
+    try {
+      const created = await createInsight({ author: insight.author, note: insight.note, coacheeId: insight.coacheeId });
+      setInsights((prev) => [created, ...prev]);
+      setInsightsError(null);
+    } catch {
+      setInsightsError('Could not save insight. Please try again.');
+    }
+  }
+
+  async function handleUpdateInsight(insightId: string, patch: { author: string; note: string; coacheeId?: string | null }): Promise<void> {
+    try {
+      const updated = await updateInsight(insightId, patch);
+      setInsights((prev) => prev.map((item) => (item.id === insightId ? updated : item)));
+      setInsightsError(null);
+    } catch {
+      setInsightsError('Could not update insight. Please try again.');
+    }
+  }
+
+  async function handleDeleteInsight(insightId: string): Promise<void> {
+    try {
+      await deleteInsight(insightId);
+      setInsights((prev) => prev.filter((item) => item.id !== insightId));
+      setInsightsError(null);
+    } catch {
+      setInsightsError('Could not delete insight. Please try again.');
+    }
+  }
+
   async function handleAuthenticated(): Promise<void> {
     try {
       const user = await getMe();
@@ -165,6 +237,7 @@ export default function App() {
     clearToken();
     setCurrentUser(null);
     setSelectedPlan(null);
+    setSelectedInsightCoachee(null);
     setActiveModule('plans');
   }
 
@@ -234,6 +307,30 @@ export default function App() {
         )}
 
         {activeModule === 'calendar' && <CalendarPanel coachees={coachees} currentUser={currentUser} />}
+
+        {activeModule === 'insights' && (
+          <>
+            {insightsLoading && <p className='muted'>Loading insights...</p>}
+            {insightsError && <p className='muted' role='alert'>{insightsError}</p>}
+            <InsightsJournal
+              insights={insights}
+              coachees={coachees}
+              currentUserRole={currentUser.role}
+              currentUsername={currentUser.username}
+              selectedFilterCoachee={selectedInsightCoachee}
+              onFilterChange={setSelectedInsightCoachee}
+              onAddInsight={(item) => {
+                void handleAddInsight(item);
+              }}
+              onUpdateInsight={(insightId, patch) => {
+                void handleUpdateInsight(insightId, patch);
+              }}
+              onDeleteInsight={(insightId) => {
+                void handleDeleteInsight(insightId);
+              }}
+            />
+          </>
+        )}
 
         {activeModule === 'administration' && <AdministrationPanel currentUser={currentUser} />}
       </section>

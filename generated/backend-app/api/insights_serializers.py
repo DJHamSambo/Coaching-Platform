@@ -3,6 +3,8 @@ from api.models import Insight
 
 
 class InsightsSerializer(serializers.ModelSerializer):
+    coachee_name = serializers.CharField(source="coachee.name", read_only=True, allow_null=True)
+
     class Meta:
         model = Insight
         fields = "__all__"

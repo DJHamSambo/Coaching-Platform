@@ -133,6 +133,7 @@ class Insight(models.Model):
     title = models.CharField(max_length=1000, help_text="The insight/journal note text")
     author = models.CharField(max_length=100, default="Coach")
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="insights")
+    coachee = models.ForeignKey(Coachee, on_delete=models.SET_NULL, null=True, blank=True, related_name="insights")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
