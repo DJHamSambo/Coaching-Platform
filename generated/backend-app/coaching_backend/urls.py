@@ -8,6 +8,7 @@ from api.tasks_views import TasksListView, TasksDetailView
 from api.messages_views import MessagesListView, MessagesDetailView
 from api.coachees_views import CoacheesListView, CoacheesDetailView
 from api.plans_views import PlansListView, PlansDetailView, PlanActionsListView, PlanActionsDetailView
+from api.insights_views import InsightsListView, InsightsDetailView
 from api.sessions_views import (
     MyCalendarCoachesListView,
     SessionsListView,
@@ -55,4 +56,6 @@ urlpatterns = [
     path("api/tasks/<int:pk>/", TasksDetailView.as_view(), name="tasks-detail"),
     path("api/messages/", MessagesListView.as_view(), name="messages-list"),
     path("api/messages/<int:pk>/", MessagesDetailView.as_view(), name="messages-detail"),
+    path("api/insights/", InsightsListView.as_view(), name="insights-list"),
+    path("api/insights/<int:pk>/", InsightsDetailView.as_view(), name="insights-detail"),
 ]

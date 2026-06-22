@@ -87,6 +87,9 @@ export interface InsightItem {
   author: string;
   note: string;
   createdAt: string;
+  updatedAt?: string;
+  coacheeId?: string | null;
+  coacheeName?: string | null;
 }
 
 export interface ResourceItem {

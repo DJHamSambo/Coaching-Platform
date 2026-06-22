@@ -897,6 +897,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--main-branch", default="main", help="Main branch name.")
     parser.add_argument("--execute", action="store_true", help="Run git commands instead of producing a dry-run plan.")
     parser.add_argument(
+        "--create-feature",
+        action="store_true",
+        help="(Deprecated: now default) Create a feature branch and stage changes.",
+    )
+    parser.add_argument(
         "--cleanup-feature-branch",
         action="store_true",
         help="Clean up a merged feature branch (local and/or remote).",
