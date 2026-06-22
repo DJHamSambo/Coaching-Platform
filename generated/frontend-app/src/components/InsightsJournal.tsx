@@ -46,9 +46,9 @@ export function InsightsJournal({
         <h3>Add insight</h3>
         {isCacheCoach && (
           <label>
-            Assign to coachee (optional)
+            Assign to coachee
             <select value={selectedCoachee || ''} onChange={(event) => setSelectedCoachee(event.target.value || null)}>
-              <option value=''>None (personal note)</option>
+              <option value=''>Select coachee</option>
               {coachees.map((coachee) => (
                 <option key={coachee.id} value={coachee.id}>
                   {coachee.name}
@@ -91,12 +91,12 @@ export function InsightsJournal({
                 <>
                   {isCacheCoach && (
                     <label>
-                      Assign to coachee (optional)
+                      Assign to coachee
                       <select
                         value={editCoachee || ''}
                         onChange={(event) => setEditCoachee(event.target.value || null)}
                       >
-                        <option value=''>None (personal note)</option>
+                        <option value=''>Select coachee</option>
                         {coachees.map((coachee) => (
                           <option key={coachee.id} value={coachee.id}>
                             {coachee.name}
