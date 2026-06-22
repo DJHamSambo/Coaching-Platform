@@ -72,6 +72,7 @@ Environment variables
 import argparse
 import datetime as dt
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -370,11 +371,33 @@ def _build_review_prompt(diff_files: list[DiffFile], model_name: str) -> str:
 
 
 
+# Default location (repo-relative) where a chat agent writes its review verdict
+# so an automated CI gate can read it and decide pass/fail.
+CHAT_REVIEW_RESULT_REL = "generated/code-review-result.json"
+
+
+def diff_fingerprint(diff_files: list[DiffFile]) -> str:
+    """Return a stable hash of the reviewable diff content.
+
+    Used to tie a chat-produced review result to the exact diff it reviewed, so
+    a stale result cannot pass a branch whose code has since changed.
+    """
+    hasher = hashlib.sha256()
+    for df in sorted(diff_files, key=lambda d: d.path):
+        hasher.update(df.path.encode("utf-8"))
+        hasher.update(b"\0")
+        hasher.update(df.content_snippet.encode("utf-8"))
+        hasher.update(b"\0")
+    return hasher.hexdigest()
+
+
 def _build_chat_review_request(
     diff_files: list[DiffFile],
     commit: str,
     base: str,
     timestamp: str,
+    diff_hash: str,
+    result_rel_path: str = CHAT_REVIEW_RESULT_REL,
 ) -> str:
     """Build a self-contained review request for an interactive chat agent.
 
@@ -383,6 +406,11 @@ def _build_chat_review_request(
     the captured diff with instructions to read surrounding files, run checks,
     and reason across the codebase — i.e. review the change the way you would
     if asked directly in chat.
+
+    The request also embeds a machine-readable result contract: the chat agent
+    must write its verdict to ``result_rel_path`` so an automated CI gate can
+    read it and decide pass/fail. The ``diff_hash`` ties a result to this exact
+    diff so a stale result cannot pass a changed branch.
     """
     files_text: list[str] = []
     for df in diff_files:
@@ -394,6 +422,22 @@ def _build_chat_review_request(
         )
     joined = "\n\n".join(files_text) if files_text else "_(no reviewable diff content)_"
     file_list = "\n".join(f"- `{df.path}`" for df in diff_files) or "- _(none)_"
+
+    result_template = json.dumps(
+        {
+            "diff_hash": diff_hash,
+            "commit": commit,
+            "base": base,
+            "score": 0,
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "verdict": "pass",
+            "summary": "<2-4 sentence overall assessment>",
+        },
+        indent=2,
+    )
 
     return "\n".join([
         "# Code Review Request (chat handoff)",
@@ -408,6 +452,7 @@ def _build_chat_review_request(
         f"| Base | `{base}` |",
         f"| Timestamp | {timestamp} |",
         f"| Files in scope | {len(diff_files)} |",
+        f"| Diff hash | `{diff_hash}` |",
         "",
         "## Files in scope",
         "",
@@ -430,6 +475,24 @@ def _build_chat_review_request(
         "For each finding give: file/line, severity (critical/high/medium/low/info),",
         "the problem, and a concrete suggested fix. End with a short overall",
         "assessment and a 0–10 quality score.",
+        "",
+        "## Result contract (required for the CI gate)",
+        "",
+        f"After reviewing, write your verdict to `{result_rel_path}` as JSON with",
+        "exactly these fields. Copy `diff_hash` verbatim from above so the gate can",
+        "confirm the verdict matches this diff:",
+        "",
+        "```json",
+        result_template,
+        "```",
+        "",
+        "Field rules:",
+        "",
+        "- `critical`/`high`/`medium`/`low`: integer counts of findings at each severity.",
+        "- `score`: integer 0–10 (10 = production-perfect).",
+        "- `verdict`: `\"pass\"` or `\"fail\"`. The merge is BLOCKED if `verdict` is",
+        "  `\"fail\"` or if any of `critical`/`high`/`medium` is greater than zero.",
+        "- `diff_hash`: must equal the value above, or the gate treats the result as stale.",
         "",
         "## Captured diff",
         "",
@@ -862,6 +925,21 @@ class CodeReviewAgent:
         ]
         return eligible[:_max_reviewable_files()]
 
+    def review_fingerprint(
+        self,
+        repo_path: Path,
+        commit: str,
+        base: str,
+        diff_file: Path | None = None,
+    ) -> str:
+        """Return the diff fingerprint for the reviewable scope of a change.
+
+        Mirrors what :meth:`emit_review_request` embeds in the request, so a CI
+        gate can confirm a chat-produced result matches the current diff.
+        """
+        diff_files = self.get_diff(repo_path, commit, base, diff_file)
+        return diff_fingerprint(self._select_reviewable(diff_files))
+
     def emit_review_request(
         self,
         repo_path: Path,
@@ -879,7 +957,10 @@ class CodeReviewAgent:
         timestamp  = dt.datetime.now(dt.timezone.utc).isoformat()
         diff_files = self.get_diff(repo_path, commit, base, diff_file)
         reviewable = self._select_reviewable(diff_files)
-        document   = _build_chat_review_request(reviewable, commit, base, timestamp)
+        fingerprint = diff_fingerprint(reviewable)
+        document   = _build_chat_review_request(
+            reviewable, commit, base, timestamp, fingerprint,
+        )
 
         target = out_path or (repo_path / self.REQUEST_FILENAME)
         target.parent.mkdir(parents=True, exist_ok=True)

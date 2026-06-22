@@ -24,6 +24,7 @@ from agents.code_review_agent import (  # noqa: E402
     Finding as _Finding,
     ReviewResult as _ReviewResult,
     Severity as _Severity,
+    CHAT_REVIEW_RESULT_REL as _CHAT_REVIEW_RESULT_REL,
     _available_models as _available_review_models,
     _load_dotenv as _load_review_dotenv,
 )
@@ -510,7 +511,122 @@ class GitFlowAgent:
     # Code review CI gate
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _ci_mode() -> str:
+        """Return the CI gate mode: 'chat' (default) or 'model'.
+
+        Override via the ``GITFLOW_CI_MODE`` environment variable.
+        """
+        mode = os.environ.get("GITFLOW_CI_MODE", "chat").strip().lower()
+        return mode if mode in {"chat", "model"} else "chat"
+
     def run_code_review_ci(
+        self,
+        feature_branch: str,
+        base_branch: str,
+    ) -> CIResult:
+        """Run the code review CI gate before merging.
+
+        Dispatches based on ``GITFLOW_CI_MODE``:
+
+        * ``chat`` (default) — emit a chat-handoff review request and read the
+          verdict an interactive chat agent writes back, deciding pass/fail from
+          that result.  Requires no API key.
+        * ``model`` — call the AI models directly and aggregate their findings.
+        """
+        if self._ci_mode() == "model":
+            return self.run_model_code_review_ci(feature_branch, base_branch)
+        return self.run_chat_code_review_ci(feature_branch, base_branch)
+
+    def run_chat_code_review_ci(
+        self,
+        feature_branch: str,
+        base_branch: str,
+    ) -> CIResult:
+        """Chat-driven CI gate.
+
+        Emits a review request for an interactive chat agent, then reads the
+        verdict that agent writes to ``generated/code-review-result.json``. The
+        merge is blocked if the result is missing, stale (its ``diff_hash`` does
+        not match the current diff), explicitly fails, or reports any
+        Critical/High/Medium findings.
+        """
+        agent = _CodeReviewAgent()
+        _logger.info("Running chat code review: %s → %s", feature_branch, base_branch)
+
+        # (Re)generate the request so the chat agent reviews the current diff.
+        request_path = agent.emit_review_request(
+            repo_path=self.repo_path,
+            commit=feature_branch,
+            base=base_branch,
+        )
+        expected_hash = agent.review_fingerprint(self.repo_path, feature_branch, base_branch)
+
+        result_path = self.repo_path / _CHAT_REVIEW_RESULT_REL
+        if not result_path.exists():
+            _logger.error(
+                "No chat review verdict found at %s. "
+                "Open %s in chat, perform the review, write the result file, then re-run.",
+                result_path, request_path,
+            )
+            return CIResult(
+                passed=False, score=0.0, models_used=["chat"],
+                critical=1, high=0, medium=0, low=0,
+                fix_instructions_path=request_path,
+            )
+
+        try:
+            data = json.loads(result_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            _logger.error("Could not parse chat review result %s: %s", result_path, exc)
+            return CIResult(
+                passed=False, score=0.0, models_used=["chat"],
+                critical=1, high=0, medium=0, low=0,
+                fix_instructions_path=request_path,
+            )
+
+        if str(data.get("diff_hash", "")) != expected_hash:
+            _logger.error(
+                "Chat review result is stale (diff_hash mismatch). "
+                "Re-review %s and update %s.",
+                request_path, result_path,
+            )
+            return CIResult(
+                passed=False, score=0.0, models_used=["chat"],
+                critical=1, high=0, medium=0, low=0,
+                fix_instructions_path=request_path,
+            )
+
+        def _as_int(value: object) -> int:
+            try:
+                return max(0, int(value))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return 0
+
+        critical = _as_int(data.get("critical"))
+        high     = _as_int(data.get("high"))
+        medium   = _as_int(data.get("medium"))
+        low      = _as_int(data.get("low"))
+        try:
+            score = float(data.get("score", 0))
+        except (TypeError, ValueError):
+            score = 0.0
+        verdict = str(data.get("verdict", "")).strip().lower()
+
+        passed = verdict != "fail" and (critical + high + medium) == 0
+
+        return CIResult(
+            passed=passed,
+            score=score,
+            models_used=["chat"],
+            critical=critical,
+            high=high,
+            medium=medium,
+            low=low,
+            fix_instructions_path=None if passed else request_path,
+        )
+
+    def run_model_code_review_ci(
         self,
         feature_branch: str,
         base_branch: str,
@@ -927,6 +1043,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Bypass the code review CI gate when merging (emergency use only).",
     )
     parser.add_argument(
+        "--ci-mode",
+        choices=["chat", "model"],
+        default=None,
+        help="Code review CI gate mode: 'chat' (default, reads a chat-written "
+             "verdict; no API key) or 'model' (calls AI models directly). "
+             "Overrides the GITFLOW_CI_MODE environment variable.",
+    )
+    parser.add_argument(
         "--auto-implement",
         action="store_true",
         help="When CI fails during merge, attempt developer-agent auto remediation before failing.",
@@ -952,6 +1076,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
+    if args.ci_mode:
+        os.environ["GITFLOW_CI_MODE"] = args.ci_mode
     agent = GitFlowAgent(
         repo_path=args.repo,
         main_branch=args.main_branch,
