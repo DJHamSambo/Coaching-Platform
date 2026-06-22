@@ -339,8 +339,12 @@ function toInsightItem(insight: ApiInsight): InsightItem {
   };
 }
 
-export async function listInsights(): Promise<InsightItem[]> {
-  const insights = await request<ApiInsight[] | ApiListResponse<ApiInsight>>('/api/insights/');
+export async function listInsights(coacheeId?: string | null): Promise<InsightItem[]> {
+  let url = '/api/insights/';
+  if (coacheeId) {
+    url += `?coachee_id=${coacheeId}`;
+  }
+  const insights = await request<ApiInsight[] | ApiListResponse<ApiInsight>>(url);
   return toListResults(insights)
     .map(toInsightItem)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

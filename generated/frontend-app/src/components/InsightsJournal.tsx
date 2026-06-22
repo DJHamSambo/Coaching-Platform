@@ -6,6 +6,8 @@ interface InsightsJournalProps {
   coachees: Coachee[];
   currentUserRole: 'admin' | 'coach' | 'coachee';
   currentUsername: string;
+  selectedFilterCoachee?: string | null;
+  onFilterChange?: (coacheeId: string | null) => void;
   onAddInsight: (insight: InsightItem) => void;
   onUpdateInsight: (insightId: string, patch: { author: string; note: string; coacheeId?: string | null }) => void;
   onDeleteInsight: (insightId: string) => void;
@@ -22,6 +24,8 @@ export function InsightsJournal({
   coachees,
   currentUserRole,
   currentUsername,
+  selectedFilterCoachee,
+  onFilterChange,
   onAddInsight,
   onUpdateInsight,
   onDeleteInsight,
@@ -84,6 +88,22 @@ export function InsightsJournal({
 
       <div className='card'>
         <h3>Timeline</h3>
+        {isCacheCoach && onFilterChange && (
+          <label>
+            Filter by coachee
+            <select
+              value={selectedFilterCoachee || ''}
+              onChange={(event) => onFilterChange(event.target.value || null)}
+            >
+              <option value=''>All coachees</option>
+              {coachees.map((coachee) => (
+                <option key={coachee.id} value={coachee.id}>
+                  {coachee.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <ul className='list'>
           {insights.map((insight) => (
             <li key={insight.id}>

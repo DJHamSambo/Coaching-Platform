@@ -23,8 +23,20 @@ class InsightsListView(generics.ListCreateAPIView):
                 Q(coachee=coachee) | Q(owner=user)
             ).order_by('-created_at')
         else:
-            # Coaches see insights they created (including those assigned to their coachees)
-            return self.serializer_class.Meta.model.objects.filter(owner=user).order_by('-created_at')
+            # Coaches see:
+            # 1. All insights from their coachees (regardless of who created them)
+            # 2. Insights they created themselves
+            coach_coachees = Coachee.objects.filter(added_by=user)
+            queryset = self.serializer_class.Meta.model.objects.filter(
+                Q(coachee__in=coach_coachees) | Q(owner=user)
+            ).order_by('-created_at')
+            
+            # Support filtering by coachee_id
+            coachee_id = self.request.query_params.get('coachee_id')
+            if coachee_id:
+                queryset = queryset.filter(coachee_id=coachee_id)
+            
+            return queryset
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
@@ -46,8 +58,11 @@ class InsightsDetailView(generics.RetrieveUpdateDestroyAPIView):
                 Q(coachee=coachee) | Q(owner=user)
             )
         else:
-            # Coaches can only access their own insights
-            return self.serializer_class.Meta.model.objects.filter(owner=user)
+            # Coaches can access all insights related to their coachees plus their own
+            coach_coachees = Coachee.objects.filter(added_by=user)
+            return self.serializer_class.Meta.model.objects.filter(
+                Q(coachee__in=coach_coachees) | Q(owner=user)
+            )
 
     def perform_update(self, serializer):
         # Only allow users to edit insights they created
@@ -59,5 +74,4 @@ class InsightsDetailView(generics.RetrieveUpdateDestroyAPIView):
         # Only allow users to delete insights they created
         if instance.owner != self.request.user:
             raise PermissionDenied("You can only delete insights you created.")
-        instance.delete()
         instance.delete()

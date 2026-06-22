@@ -60,6 +60,7 @@ export default function App() {
   const [insights, setInsights] = useState<InsightItem[]>([]);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [insightsError, setInsightsError] = useState<string | null>(null);
+  const [selectedInsightCoachee, setSelectedInsightCoachee] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,6 +99,7 @@ export default function App() {
       clearToken();
       setCurrentUser(null);
       setSelectedPlan(null);
+      setSelectedInsightCoachee(null);
       setActiveModule('plans');
       setPlansError(SESSION_EXPIRED_MESSAGE);
     }
@@ -134,7 +136,7 @@ export default function App() {
     if (!currentUser || activeModule !== 'insights') return;
     let cancelled = false;
     setInsightsLoading(true);
-    listInsights()
+    listInsights(currentUser.role === 'coach' ? selectedInsightCoachee : null)
       .then((items) => {
         if (!cancelled) {
           setInsights(items);
@@ -150,7 +152,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeModule, currentUser]);
+  }, [activeModule, currentUser, selectedInsightCoachee]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -235,6 +237,7 @@ export default function App() {
     clearToken();
     setCurrentUser(null);
     setSelectedPlan(null);
+    setSelectedInsightCoachee(null);
     setActiveModule('plans');
   }
 
@@ -314,6 +317,8 @@ export default function App() {
               coachees={coachees}
               currentUserRole={currentUser.role}
               currentUsername={currentUser.username}
+              selectedFilterCoachee={selectedInsightCoachee}
+              onFilterChange={setSelectedInsightCoachee}
               onAddInsight={(item) => {
                 void handleAddInsight(item);
               }}
