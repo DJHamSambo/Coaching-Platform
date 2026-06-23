@@ -1,4 +1,4 @@
-import type { DiscussionItem, InsightItem, PlanTask, ResourceItem, SessionItem } from '../types';
+import type { DiscussionItem, InsightItem, PlanTask, SessionItem } from '../types';
 
 export const requirementTitle = 'Development Requirements';
 
@@ -21,10 +21,4 @@ export const initialDiscussions: DiscussionItem[] = [
 export const initialInsights: InsightItem[] = [
   { id: 'insight-1', author: 'Coach', note: 'Confidence increases when tasks are clearly scoped.', createdAt: '2026-06-10' },
   { id: 'insight-2', author: 'Coachee', note: 'Morning planning sessions improve execution.', createdAt: '2026-06-11' },
-];
-
-export const initialResources: ResourceItem[] = [
-  { id: 'resource-1', title: 'Goal decomposition worksheet', category: 'worksheet', scope: 'plan' },
-  { id: 'resource-2', title: 'Feedback conversation guide', category: 'guide', scope: 'shared' },
-  { id: 'resource-3', title: 'Weekly reflection template', category: 'guide', scope: 'shared' },
 ];

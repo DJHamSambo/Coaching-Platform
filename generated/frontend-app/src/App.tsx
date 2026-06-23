@@ -39,18 +39,21 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
     plans: 'Coaches can create one to many coaching plans for a coachee.',
     insights: 'Capture and revisit private reflections and progress notes for each coachee.',
     calendar: 'Schedule sessions and manage your availability with coachees.',
+    resources: 'Upload and share documents, linking them to the coaching plans they support.',
     administration: 'Manage coaches, coachees, and their account access.',
   },
   admin: {
     plans: 'Oversee the coaching plans created across coaches and coachees.',
     insights: 'Review reflections and progress notes captured across the platform.',
     calendar: 'Oversee sessions and availability across coaches and coachees.',
+    resources: 'Oversee documents shared across coaching plans on the platform.',
     administration: 'Manage coaches, coachees, and their account access.',
   },
   coachee: {
     plans: 'Follow the coaching plans your coach has created for you.',
     insights: 'Capture and revisit your private reflections and progress notes.',
     calendar: 'View upcoming sessions and request time with your coach.',
+    resources: 'Upload and share documents with your coach to support your plans.',
     administration: 'Manage your account access.',
   },
 };
@@ -332,6 +335,8 @@ export default function App() {
         )}
 
         {activeModule === 'calendar' && <CalendarPanel coachees={coachees} currentUser={currentUser} />}
+
+        {activeModule === 'resources' && <ResourceLibrary plans={plans} currentUser={currentUser} />}
 
         {activeModule === 'insights' && (
           <>

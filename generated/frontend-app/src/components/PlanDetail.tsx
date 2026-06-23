@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createAction, createDiscussion, getCurrentUsername, getPlan, listActions, listDiscussions, listSessionsForPlan, updateAction, updateActionStatus, updatePlan, updateSession } from '../api';
-import type { AdminCoach, AdminCoachee, CalendarSession, CoachingPlan, CurrentUser, DiscussionItem, PlanAction, TaskStatus } from '../types';
+import { createAction, createDiscussion, getCurrentUsername, getPlan, listActions, listDiscussions, listResources, listSessionsForPlan, updateAction, updateActionStatus, updatePlan, updateSession } from '../api';
+import type { AdminCoach, AdminCoachee, CalendarSession, CoachingPlan, CurrentUser, DiscussionItem, PlanAction, ResourceItem, TaskStatus } from '../types';
 import { toLocalDateTimeInputValue } from './calendar/calendarUtils';
 
 interface PlanDetailProps {
@@ -44,6 +44,9 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
   const [sessionEditDuration, setSessionEditDuration] = useState(60);
   const [sessionEditNotes, setSessionEditNotes] = useState('');
   const [sessionEditError, setSessionEditError] = useState<string | null>(null);
+
+  // Documents linked to this plan
+  const [planDocuments, setPlanDocuments] = useState<ResourceItem[]>([]);
 
   const [planDiscussionText, setPlanDiscussionText] = useState('');
   const [actionDiscussionText, setActionDiscussionText] = useState('');
@@ -134,6 +137,13 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
   useEffect(() => {
     listSessionsForPlan(plan.id)
       .then(setPlanSessions)
+      .catch(() => { /* non-critical */ });
+  }, [plan.id]);
+
+  // Fetch documents linked to this plan
+  useEffect(() => {
+    listResources(plan.id)
+      .then(setPlanDocuments)
       .catch(() => { /* non-critical */ });
   }, [plan.id]);
   useEffect(() => {
@@ -498,6 +508,38 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
                 </li>
               );
             })}
+          </ul>
+        )}
+      </div>
+
+      {/* Documents linked to this plan */}
+      <div className='card' style={{ marginTop: 20 }}>
+        <h3>Documents</h3>
+        {planDocuments.length === 0 ? (
+          <p className='muted'>No documents linked to this plan yet. Add them from the Resources tab.</p>
+        ) : (
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {planDocuments.map((doc) => (
+              <li
+                key={doc.id}
+                className='card'
+                style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <strong>{doc.title}</strong>
+                  {doc.description && <p className='muted' style={{ fontSize: 13, margin: '2px 0 0' }}>{doc.description}</p>}
+                  <span className='muted' style={{ fontSize: 12 }}>
+                    Uploaded by {doc.ownerUsername}
+                    {doc.createdAt ? ` · ${doc.createdAt}` : ''}
+                  </span>
+                </div>
+                {doc.fileUrl && (
+                  <a href={doc.fileUrl} target='_blank' rel='noreferrer' download style={{ flexShrink: 0 }}>
+                    {doc.fileName ?? 'Download'}
+                  </a>
+                )}
+              </li>
+            ))}
           </ul>
         )}
       </div>
