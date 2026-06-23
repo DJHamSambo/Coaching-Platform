@@ -52,6 +52,23 @@ body {
 }
 
 .hero h1 { margin: 0.35rem 0 0.5rem; }
+.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.hero-intro { min-width: 0; }
+.hero-account {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.hero-account .muted { margin: 0; }
 .eyebrow {
   margin: 0;
   text-transform: uppercase;
@@ -127,6 +144,30 @@ button.primary {
   border-radius: 8px;
   padding: 0.5rem 0.8rem;
   cursor: pointer;
+}
+
+/* Consistent secondary style for all unclassed action buttons
+   (e.g. Previous, Next, Today, Edit, Remove, Delete). Specialised
+   buttons keep their own class-based styling. */
+button:not([class]) {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.45rem 0.8rem;
+  font: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+}
+button:not([class]):hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+button:not([class]):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  border-color: var(--line);
+  color: var(--muted);
 }
 
 .list { margin: 0.8rem 0 0; padding-left: 1.15rem; }
@@ -450,6 +491,72 @@ button.primary {
 
 .calendar-event strong {
   display: block;
+}
+
+/* UX-001: Visible focus states for keyboard navigation (WCAG 2.4.7, 2.1.1).
+   :focus-visible only shows the indicator for keyboard/assistive interaction,
+   not mouse clicks, keeping the visual design clean while staying accessible. */
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.tab:focus-visible,
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role='button']:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(11, 118, 110, 0.25);
+}
+
+/* UX-002: Purposeful, restrained motion for feedback and hierarchy
+   (WCAG 2.2.2, 2.3.3). Kept subtle and reversible. */
+.tab,
+button,
+a,
+.calendar-event {
+  transition: background-color 0.18s ease, color 0.18s ease,
+    box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.tab:hover,
+button:hover,
+.calendar-event:hover {
+  transform: translateY(-1px);
+}
+
+@keyframes ux-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.app-shell > * {
+  animation: ux-fade-in 0.28s ease both;
+}
+
+/* Respect users who prefer reduced motion: disable transitions and
+   animations rather than removing the focus/feedback semantics. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .tab:hover,
+  button:hover,
+  .calendar-event:hover {
+    transform: none;
+  }
 }
 
 .calendar-unavailable {
