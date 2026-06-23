@@ -52,6 +52,23 @@ body {
 }
 
 .hero h1 { margin: 0.35rem 0 0.5rem; }
+.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.hero-intro { min-width: 0; }
+.hero-account {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.hero-account .muted { margin: 0; }
 .eyebrow {
   margin: 0;
   text-transform: uppercase;
@@ -127,6 +144,30 @@ button.primary {
   border-radius: 8px;
   padding: 0.5rem 0.8rem;
   cursor: pointer;
+}
+
+/* Consistent secondary style for all unclassed action buttons
+   (e.g. Previous, Next, Today, Edit, Remove, Delete). Specialised
+   buttons keep their own class-based styling. */
+button:not([class]) {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.45rem 0.8rem;
+  font: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+}
+button:not([class]):hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+button:not([class]):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  border-color: var(--line);
+  color: var(--muted);
 }
 
 .list { margin: 0.8rem 0 0; padding-left: 1.15rem; }
