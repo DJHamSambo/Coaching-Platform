@@ -161,10 +161,31 @@ async function parseClientSafeError(response: Response): Promise<string> {
 
   let parsedMessage = '';
   try {
-    const data = (await response.clone().json()) as { detail?: unknown; message?: unknown; error?: unknown };
-    const candidate = data.detail ?? data.message ?? data.error;
-    if (typeof candidate === 'string') {
-      parsedMessage = candidate;
+    const data = (await response.clone().json()) as unknown;
+    if (data && typeof data === 'object') {
+      const record = data as Record<string, unknown>;
+      const candidate = record.detail ?? record.message ?? record.error;
+      if (typeof candidate === 'string') {
+        parsedMessage = candidate;
+      } else {
+        // DRF field validation errors arrive as { field: ["message", ...] }
+        // or { field: "message" }. Surface the first concrete message.
+        for (const value of Object.values(record)) {
+          if (typeof value === 'string' && value) {
+            parsedMessage = value;
+            break;
+          }
+          if (Array.isArray(value)) {
+            const first = value.find((item) => typeof item === 'string' && item);
+            if (typeof first === 'string') {
+              parsedMessage = first;
+              break;
+            }
+          }
+        }
+      }
+    } else if (typeof data === 'string') {
+      parsedMessage = data;
     }
   } catch {
     parsedMessage = '';
