@@ -4,6 +4,7 @@ import { PlanDetail } from './components/PlanDetail';
 import { CalendarPanel } from './components/CalendarPanel';
 import { AdministrationPanel } from './components/AdministrationPanel';
 import { InsightsJournal } from './components/InsightsJournal';
+import { ResourceLibrary } from './components/ResourceLibrary';
 import { LoginScreen } from './components/LoginScreen';
 import {
   clearToken,
@@ -28,6 +29,7 @@ const MODULES = [
   { key: 'plans', label: 'Coaching Plans', enabled: true },
   { key: 'insights', label: 'Insights', enabled: true },
   { key: 'calendar', label: 'Calendar', enabled: CALENDAR_FEATURE_ENABLED },
+  { key: 'resources', label: 'Resources', enabled: true },
   { key: 'administration', label: 'Administration', enabled: true },
 ] as const;
 

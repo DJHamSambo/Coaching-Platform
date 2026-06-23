@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from api.models import CoachingPlan, Task, Message
+from api.resources_serializers import ResourcesSerializer
 
 
 class ActionSerializer(serializers.ModelSerializer):
@@ -18,6 +19,7 @@ class PlanMessageSerializer(serializers.ModelSerializer):
 
 class CoachingPlanSerializer(serializers.ModelSerializer):
     actions = ActionSerializer(many=True, read_only=True)
+    documents = ResourcesSerializer(many=True, read_only=True)
     coachee_name = serializers.CharField(source="coachee.name", read_only=True, default=None)
     coach_username = serializers.CharField(source="coach.username", read_only=True, default=None)
 
@@ -26,7 +28,7 @@ class CoachingPlanSerializer(serializers.ModelSerializer):
         fields = [
             "id", "title", "description", "goal", "status",
             "target_date", "coachee", "coachee_name", "coach", "coach_username",
-            "actions", "created_at", "updated_at",
+            "actions", "documents", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "coach", "created_at", "updated_at"]
 

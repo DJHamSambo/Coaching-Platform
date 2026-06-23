@@ -13,6 +13,7 @@ import type {
   PlanAction,
   PlanStatus,
   PlanTask,
+  ResourceItem,
   TaskStatus,
   UnavailablePeriod,
   WeeklyAvailabilityWindow,
@@ -187,8 +188,10 @@ interface RequestBehavior {
 
 async function request<T>(path: string, options: RequestInit = {}, behavior: RequestBehavior = {}): Promise<T> {
   const token = behavior.skipAuth ? null : await ensureValidAccessToken();
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    // Let the browser set the multipart boundary for FormData uploads.
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string> | undefined),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -544,6 +547,7 @@ interface ApiPlan {
   coachee_name: string | null;
   coach_username: string | null;
   created_at: string;
+  documents?: ApiResource[];
 }
 
 function toPlanStatus(status: ApiPlan['status']): PlanStatus {
@@ -568,6 +572,7 @@ function toCoachingPlan(p: ApiPlan): CoachingPlan {
     coacheeName: p.coachee_name ?? null,
     coachUsername: p.coach_username ?? null,
     createdAt: p.created_at.slice(0, 10),
+    documents: p.documents ? p.documents.map(toResourceItem) : undefined,
   };
 }
 
@@ -889,4 +894,63 @@ export async function updateUnavailablePeriod(
 
 export async function deleteUnavailablePeriod(periodId: string): Promise<void> {
   await request<void>(`/api/availability/unavailable/${periodId}/`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
+// Resources (shared documents, optionally linked to a coaching plan)
+// ---------------------------------------------------------------------------
+
+interface ApiResource {
+  id: number;
+  title: string;
+  description: string;
+  category: string;
+  scope: string;
+  plan: number | null;
+  plan_title: string | null;
+  file_url: string | null;
+  file_name: string | null;
+  owner_username: string;
+  created_at: string;
+}
+
+function toResourceItem(r: ApiResource): ResourceItem {
+  return {
+    id: String(r.id),
+    title: r.title,
+    description: r.description ?? '',
+    category: r.category ?? '',
+    scope: r.scope ?? '',
+    planId: r.plan ? String(r.plan) : null,
+    planTitle: r.plan_title ?? null,
+    fileUrl: r.file_url ?? null,
+    fileName: r.file_name ?? null,
+    ownerUsername: r.owner_username ?? '',
+    createdAt: r.created_at ? r.created_at.slice(0, 10) : '',
+  };
+}
+
+export async function listResources(planId?: string): Promise<ResourceItem[]> {
+  const suffix = planId ? `?plan=${encodeURIComponent(planId)}` : '';
+  const resources = await request<ApiResource[]>(`/api/resources/${suffix}`);
+  return resources.map(toResourceItem);
+}
+
+export async function createResource(payload: {
+  title: string;
+  description?: string;
+  planId?: string | null;
+  file: File;
+}): Promise<ResourceItem> {
+  const form = new FormData();
+  form.append('title', payload.title);
+  form.append('description', payload.description ?? '');
+  if (payload.planId) form.append('plan', payload.planId);
+  form.append('file', payload.file);
+  const created = await request<ApiResource>('/api/resources/', { method: 'POST', body: form });
+  return toResourceItem(created);
+}
+
+export async function deleteResource(resourceId: string): Promise<void> {
+  await request<void>(`/api/resources/${resourceId}/`, { method: 'DELETE' });
 }
