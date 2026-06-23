@@ -4,6 +4,7 @@ import { PlanDetail } from './components/PlanDetail';
 import { CalendarPanel } from './components/CalendarPanel';
 import { AdministrationPanel } from './components/AdministrationPanel';
 import { InsightsJournal } from './components/InsightsJournal';
+import { ResourceLibrary } from './components/ResourceLibrary';
 import { LoginScreen } from './components/LoginScreen';
 import {
   clearToken,
@@ -19,7 +20,6 @@ import {
   updateInsight,
 } from './api';
 import { SESSION_EXPIRED_MESSAGE } from './constants/messages';
-import { requirementTitle } from './data/seed';
 import type { AdminCoachee, AdminCoach, CoachingPlan, CurrentUser, InsightItem } from './types';
 
 const CALENDAR_FEATURE_ENABLED = import.meta.env.VITE_ENABLE_CALENDAR !== 'false';
@@ -28,10 +28,35 @@ const MODULES = [
   { key: 'plans', label: 'Coaching Plans', enabled: true },
   { key: 'insights', label: 'Insights', enabled: true },
   { key: 'calendar', label: 'Calendar', enabled: CALENDAR_FEATURE_ENABLED },
+  { key: 'resources', label: 'Resources', enabled: true },
   { key: 'administration', label: 'Administration', enabled: true },
 ] as const;
 
 type ModuleKey = (typeof MODULES)[number]['key'];
+
+const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> = {
+  coach: {
+    plans: 'Coaches can create one to many coaching plans for a coachee.',
+    insights: 'Capture and revisit private reflections and progress notes for each coachee.',
+    calendar: 'Schedule sessions and manage your availability with coachees.',
+    resources: 'Upload and share documents, linking them to the coaching plans they support.',
+    administration: 'Manage coaches, coachees, and their account access.',
+  },
+  admin: {
+    plans: 'Oversee the coaching plans created across coaches and coachees.',
+    insights: 'Review reflections and progress notes captured across the platform.',
+    calendar: 'Oversee sessions and availability across coaches and coachees.',
+    resources: 'Oversee documents shared across coaching plans on the platform.',
+    administration: 'Manage coaches, coachees, and their account access.',
+  },
+  coachee: {
+    plans: 'Follow the coaching plans your coach has created for you.',
+    insights: 'Capture and revisit your private reflections and progress notes.',
+    calendar: 'View upcoming sessions and request time with your coach.',
+    resources: 'Upload and share documents with your coach to support your plans.',
+    administration: 'Manage your account access.',
+  },
+};
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
@@ -256,15 +281,18 @@ export default function App() {
   return (
     <main className='app-shell'>
       <header className='hero'>
-        <p className='eyebrow'>Frontend Developer Agent Output</p>
-        <h1>{requirementTitle}</h1>
-        <p className='subtitle'>Coaches can create one to many coaching plans for a coachee.</p>
-        <p className='muted' style={{ marginTop: 8 }}>
-          Signed in as {currentUser.username} ({currentUser.role})
-        </p>
-        <button type='button' onClick={handleLogout} style={{ marginTop: 8 }}>
-          Sign out
-        </button>
+        <div className='hero-intro'>
+          <h1>Coach</h1>
+          <p className='subtitle'>{MODULE_SUBTITLES[currentUser.role][activeModule]}</p>
+        </div>
+        <div className='hero-account'>
+          <p className='muted'>
+            Signed in as {currentUser.username} ({currentUser.role})
+          </p>
+          <button type='button' className='tab' onClick={handleLogout}>
+            Sign out
+          </button>
+        </div>
       </header>
 
       <nav className='module-tabs' aria-label='Feature modules'>
@@ -307,6 +335,8 @@ export default function App() {
         )}
 
         {activeModule === 'calendar' && <CalendarPanel coachees={coachees} currentUser={currentUser} />}
+
+        {activeModule === 'resources' && <ResourceLibrary plans={plans} currentUser={currentUser} />}
 
         {activeModule === 'insights' && (
           <>

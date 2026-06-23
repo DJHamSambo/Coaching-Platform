@@ -42,6 +42,7 @@ export interface CoachingPlan {
   coacheeName: string | null;
   coachUsername: string | null;
   createdAt: string;
+  documents?: ResourceItem[];
 }
 
 export interface PlanAction {
@@ -95,8 +96,15 @@ export interface InsightItem {
 export interface ResourceItem {
   id: string;
   title: string;
-  category: 'guide' | 'worksheet' | 'link';
-  scope: 'plan' | 'shared';
+  description: string;
+  category: string;
+  scope: string;
+  planId: string | null;
+  planTitle: string | null;
+  fileUrl: string | null;
+  fileName: string | null;
+  ownerUsername: string;
+  createdAt: string;
 }
 
 export type { CalendarSession, WeeklyAvailabilityWindow, UnavailablePeriod } from './types/calendarTypes';

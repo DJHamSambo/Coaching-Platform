@@ -150,6 +150,21 @@ class Resource(models.Model):
     description = models.TextField(blank=True, default="")
     category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default="guide")
     scope = models.CharField(max_length=20, choices=SCOPE_CHOICES, default="shared")
+    file = models.FileField(upload_to="resources/", max_length=255, null=True, blank=True)
+    plan = models.ForeignKey(
+        CoachingPlan,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="documents",
+        help_text="Optional coaching plan this resource is shared against",
+    )
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="resources")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return self.title

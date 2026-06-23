@@ -1,7 +1,10 @@
+from django.conf import settings
+from django.conf.urls.static import static
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from api.auth_views import register, me, health
+from api.resources_views import ResourcesListView, ResourcesDetailView
 from api.administration_views import CoachesListView, CoachesDetailView, AdminCoacheesListView, AdminCoacheesDetailView, CoachDirectoryListView
 from api.users_views import UsersListView, UsersDetailView
 from api.tasks_views import TasksListView, TasksDetailView
@@ -58,4 +61,10 @@ urlpatterns = [
     path("api/messages/<int:pk>/", MessagesDetailView.as_view(), name="messages-detail"),
     path("api/insights/", InsightsListView.as_view(), name="insights-list"),
     path("api/insights/<int:pk>/", InsightsDetailView.as_view(), name="insights-detail"),
+    # Shared coaching resources / documents (optionally linked to a plan)
+    path("api/resources/", ResourcesListView.as_view(), name="resources-list"),
+    path("api/resources/<int:pk>/", ResourcesDetailView.as_view(), name="resources-detail"),
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

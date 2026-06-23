@@ -10,12 +10,14 @@ This file is generated only after recommendation approval.
   wcag=2.4.7 Focus Visible, 2.1.1 Keyboard
   trends=inclusive interaction patterns, high-contrast focus rings
   targets=src/styles.css
+  completion=must pass UI/UX enforce mode verification
 - Apply UX-002: Add purposeful motion and reduced-motion support
   category=interaction-design; priority=medium; effort=small
   rationale=No meaningful motion cues were found. Add restrained transitions for hierarchy and feedback, and include reduced-motion media query support.
   wcag=2.2.2 Pause, Stop, Hide, 2.3.3 Animation from Interactions
   trends=staggered reveal patterns, reduced-motion preferences
   targets=src/styles.css
+  completion=must pass UI/UX enforce mode verification
 
 - Review approved UX recommendations for backend contract impact.
 - If a recommendation requires API metadata for accessibility (labels, status semantics, assistive hints), expose the required fields in response payloads and integration contracts.
