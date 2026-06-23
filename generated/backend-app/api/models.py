@@ -150,7 +150,7 @@ class Resource(models.Model):
     description = models.TextField(blank=True, default="")
     category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default="guide")
     scope = models.CharField(max_length=20, choices=SCOPE_CHOICES, default="shared")
-    file = models.FileField(upload_to="resources/", null=True, blank=True)
+    file = models.FileField(upload_to="resources/", max_length=255, null=True, blank=True)
     plan = models.ForeignKey(
         CoachingPlan,
         on_delete=models.CASCADE,
