@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 SECRET_KEY = "change-me-in-production"
 DEBUG = True
 ALLOWED_HOSTS = ["*"]
@@ -64,12 +72,30 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Email (console backend in development prints messages to the server log)
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
-DEFAULT_FROM_EMAIL = "Coaching Platform <no-reply@coaching.example>"
+# Email configuration (driven by environment variables).
+# If EMAIL_HOST is set (or EMAIL_BACKEND is overridden explicitly) the SMTP
+# backend is used; otherwise messages are printed to the server log via the
+# console backend, which is convenient for local development.
+_smtp_configured = bool(os.environ.get("EMAIL_HOST"))
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.smtp.EmailBackend"
+    if _smtp_configured
+    else "django.core.mail.backends.console.EmailBackend",
+)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = _env_bool("EMAIL_USE_TLS", default=True)
+EMAIL_USE_SSL = _env_bool("EMAIL_USE_SSL", default=False)
+EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
+DEFAULT_FROM_EMAIL = os.environ.get(
+    "DEFAULT_FROM_EMAIL", "Coaching Platform <no-reply@coaching.example>"
+)
 
 # Used to build the sign-in link included in welcome emails
-FRONTEND_LOGIN_URL = "http://localhost:5173"
+FRONTEND_LOGIN_URL = os.environ.get("FRONTEND_LOGIN_URL", "http://localhost:5173")
 
 CALENDAR_PAGE_SIZE = 100
 CALENDAR_MAX_PAGE_SIZE = 500
