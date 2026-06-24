@@ -4,6 +4,20 @@ from django.contrib.auth.models import User
 from django.db import models
 
 
+class UserProfile(models.Model):
+    """Auth-related metadata that augments the built-in User model."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
+    must_reset_password = models.BooleanField(
+        default=False,
+        help_text="True when the user signed in with a temporary password and must set a new one.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"Profile<{self.user.username}>"
+
+
 class Coachee(models.Model):
     """A coachee managed by coaches within the platform."""
     name = models.CharField(max_length=255)

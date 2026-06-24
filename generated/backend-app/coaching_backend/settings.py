@@ -54,6 +54,23 @@ REST_FRAMEWORK = {
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# Password policy (current best-practice length + complexity)
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {
+        "NAME": "api.validators.PasswordComplexityValidator",
+        "OPTIONS": {"min_length": 12},
+    },
+]
+
+# Email (console backend in development prints messages to the server log)
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+DEFAULT_FROM_EMAIL = "Coaching Platform <no-reply@coaching.example>"
+
+# Used to build the sign-in link included in welcome emails
+FRONTEND_LOGIN_URL = "http://localhost:5173"
+
 CALENDAR_PAGE_SIZE = 100
 CALENDAR_MAX_PAGE_SIZE = 500
 

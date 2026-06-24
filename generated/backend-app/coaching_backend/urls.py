@@ -3,7 +3,7 @@ from django.conf.urls.static import static
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from api.auth_views import register, me, health
+from api.auth_views import register, me, health, change_password
 from api.resources_views import ResourcesListView, ResourcesDetailView
 from api.administration_views import CoachesListView, CoachesDetailView, AdminCoacheesListView, AdminCoacheesDetailView, CoachDirectoryListView
 from api.users_views import UsersListView, UsersDetailView
@@ -25,6 +25,7 @@ from api.sessions_views import (
 urlpatterns = [
     path("api/auth/register/", register, name="register"),
     path("api/auth/me/", me, name="me"),
+    path("api/auth/change-password/", change_password, name="change-password"),
     path("api/auth/health/", health, name="health"),
     path("api/auth/login", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/auth/login/", TokenObtainPairView.as_view(), name="token_obtain_pair_slash"),
