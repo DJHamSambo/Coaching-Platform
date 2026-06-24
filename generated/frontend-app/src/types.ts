@@ -14,6 +14,7 @@ export interface CurrentUser {
   email: string;
   role: 'admin' | 'coach' | 'coachee';
   isAdmin: boolean;
+  mustResetPassword: boolean;
 }
 
 export interface AdminCoach {

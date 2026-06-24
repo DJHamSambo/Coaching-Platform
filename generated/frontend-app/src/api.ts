@@ -106,6 +106,7 @@ interface ApiMe {
   email: string;
   is_admin: boolean;
   role: 'admin' | 'coach' | 'coachee';
+  must_reset_password?: boolean;
 }
 
 interface ApiListResponse<T> {
@@ -127,7 +128,21 @@ export async function getMe(): Promise<CurrentUser> {
     email: me.email,
     role: me.role,
     isAdmin: me.is_admin,
+    mustResetPassword: Boolean(me.must_reset_password),
   };
+}
+
+export async function changePassword(payload: {
+  currentPassword: string;
+  newPassword: string;
+}): Promise<void> {
+  await request<void>('/api/auth/change-password/', {
+    method: 'POST',
+    body: JSON.stringify({
+      current_password: payload.currentPassword,
+      new_password: payload.newPassword,
+    }),
+  });
 }
 
 function getTokenExpEpochSeconds(token: string): number | null {

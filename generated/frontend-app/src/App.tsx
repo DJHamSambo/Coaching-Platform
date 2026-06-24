@@ -6,6 +6,7 @@ import { AdministrationPanel } from './components/AdministrationPanel';
 import { InsightsJournal } from './components/InsightsJournal';
 import { ResourceLibrary } from './components/ResourceLibrary';
 import { LoginScreen } from './components/LoginScreen';
+import { ForcePasswordReset } from './components/ForcePasswordReset';
 import {
   clearToken,
   createInsight,
@@ -276,6 +277,16 @@ export default function App() {
 
   if (!currentUser) {
     return <LoginScreen onAuthenticated={() => { void handleAuthenticated(); }} />;
+  }
+
+  if (currentUser.mustResetPassword) {
+    return (
+      <ForcePasswordReset
+        username={currentUser.username}
+        onComplete={() => { void handleAuthenticated(); }}
+        onCancel={handleLogout}
+      />
+    );
   }
 
   return (

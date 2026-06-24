@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
+from api.account_provisioning import provision_coach_login, provision_coachee_login
 from api.models import Coachee
 
 
@@ -19,9 +20,13 @@ class CoachSerializer(serializers.ModelSerializer):
         user = User(**validated_data)
         if password:
             user.set_password(password)
+            user.save()
         else:
+            # No password supplied: provision a temporary one and email a
+            # welcome message; the coach must reset it on first sign-in.
             user.set_unusable_password()
-        user.save()
+            user.save()
+            provision_coach_login(user)
         return user
 
     def update(self, instance, validated_data):
@@ -42,6 +47,12 @@ class AdminCoacheeSerializer(serializers.ModelSerializer):
         model = Coachee
         fields = ["id", "name", "email", "notes", "user", "user_username", "added_by", "added_by_username", "created_at"]
         read_only_fields = ["id", "added_by", "added_by_username", "created_at", "user_username"]
+
+    def create(self, validated_data):
+        coachee = super().create(validated_data)
+        # Provision a login account + welcome email when an email is provided.
+        provision_coachee_login(coachee)
+        return coachee
 
 
 class CoachDirectorySerializer(serializers.ModelSerializer):
