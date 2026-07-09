@@ -10,6 +10,7 @@ import type {
   CurrentUser,
   DiscussionItem,
   InsightItem,
+  NotificationItem,
   PlanAction,
   PlanStatus,
   PlanTask,
@@ -341,8 +342,10 @@ export async function listDiscussions(filters?: { planId?: string; taskId?: stri
   return messages.map(toDiscussionItem);
 }
 
-export async function createDiscussion(payload: { planId: string; taskId?: string; author: string; message: string }): Promise<DiscussionItem> {
-  const mentions = Array.from(new Set((payload.message.match(/@\w+/g) ?? []).map((token) => token.slice(1))));
+export async function createDiscussion(payload: { planId: string; taskId?: string; author: string; message: string; mentions?: string[] }): Promise<DiscussionItem> {
+  const mentions = payload.mentions && payload.mentions.length
+    ? payload.mentions
+    : Array.from(new Set((payload.message.match(/@\w+/g) ?? []).map((token) => token.slice(1))));
   const created = await request<ApiMessage>('/api/messages/', {
     method: 'POST',
     body: JSON.stringify({
@@ -415,6 +418,58 @@ export async function updateInsight(insightId: string, payload: { author?: strin
 
 export async function deleteInsight(insightId: string): Promise<void> {
   await request<void>(`/api/insights/${insightId}/`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
+// Activity notifications
+// ---------------------------------------------------------------------------
+
+interface ApiNotification {
+  id: number;
+  actor_name: string;
+  notification_type: NotificationItem['type'];
+  message: string;
+  target_type: string;
+  target_id: number | null;
+  plan_id: number | null;
+  action_id: number | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+function toNotificationItem(n: ApiNotification): NotificationItem {
+  const targetType = (['plan', 'action', 'session', 'insight'].includes(n.target_type)
+    ? n.target_type
+    : '') as NotificationItem['targetType'];
+  return {
+    id: String(n.id),
+    actorName: n.actor_name,
+    type: n.notification_type,
+    message: n.message,
+    targetType,
+    targetId: n.target_id != null ? String(n.target_id) : null,
+    planId: n.plan_id != null ? String(n.plan_id) : null,
+    actionId: n.action_id != null ? String(n.action_id) : null,
+    isRead: Boolean(n.is_read),
+    createdAt: n.created_at,
+  };
+}
+
+export async function listNotifications(): Promise<NotificationItem[]> {
+  const items = await request<ApiNotification[] | ApiListResponse<ApiNotification>>('/api/notifications/');
+  return toListResults(items).map(toNotificationItem);
+}
+
+export async function markNotificationRead(notificationId: string): Promise<NotificationItem> {
+  const updated = await request<ApiNotification>(`/api/notifications/${notificationId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_read: true }),
+  });
+  return toNotificationItem(updated);
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await request<{ updated: number }>('/api/notifications/mark-all-read/', { method: 'POST' });
 }
 
 // ---------------------------------------------------------------------------

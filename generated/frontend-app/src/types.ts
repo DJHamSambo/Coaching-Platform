@@ -108,4 +108,19 @@ export interface ResourceItem {
   createdAt: string;
 }
 
+export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created';
+
+export interface NotificationItem {
+  id: string;
+  actorName: string;
+  type: NotificationType;
+  message: string;
+  targetType: 'plan' | 'action' | 'session' | 'insight' | '';
+  targetId: string | null;
+  planId: string | null;
+  actionId: string | null;
+  isRead: boolean;
+  createdAt: string;
+}
+
 export type { CalendarSession, WeeklyAvailabilityWindow, UnavailablePeriod } from './types/calendarTypes';

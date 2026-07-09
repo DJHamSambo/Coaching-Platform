@@ -152,6 +152,34 @@ class Insight(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
 
+class Notification(models.Model):
+    """An activity notification delivered to a coach or coachee."""
+    TYPE_CHOICES = [
+        ("mention", "Mention"),
+        ("session_booked", "Session Booked"),
+        ("task_assigned", "Task Assigned"),
+        ("action_created", "Action Created"),
+    ]
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
+    actor_name = models.CharField(max_length=150, blank=True, default="", help_text="Display name of who triggered the notification")
+    notification_type = models.CharField(max_length=32, choices=TYPE_CHOICES)
+    message = models.CharField(max_length=500)
+    # Navigation context — where clicking the notification should take the user
+    target_type = models.CharField(max_length=32, blank=True, default="", help_text="plan | action | session | insight")
+    target_id = models.IntegerField(null=True, blank=True)
+    plan_id = models.IntegerField(null=True, blank=True)
+    action_id = models.IntegerField(null=True, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["recipient", "-created_at"])]
+
+    def __str__(self) -> str:
+        return f"Notification<{self.notification_type} -> {self.recipient.username}>"
+
+
 class Resource(models.Model):
     CATEGORY_CHOICES = [
         ("guide", "Guide"),

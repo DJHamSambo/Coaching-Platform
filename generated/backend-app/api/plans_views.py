@@ -4,6 +4,7 @@ from rest_framework.exceptions import PermissionDenied
 from django.contrib.auth.models import User
 from api.plans_serializers import CoachingPlanSerializer, CoachingPlanListSerializer, ActionSerializer
 from api.models import Coachee, CoachingPlan, Task
+from api.notifications import notify, resolve_recipient
 
 
 def _resolve_owner(request) -> User:
@@ -128,7 +129,22 @@ class PlanActionsListView(generics.ListCreateAPIView):
         # Auto-assign order as next in sequence
         last = Task.objects.filter(plan=plan).order_by("-order").first()
         next_order = (last.order + 1) if last else 0
-        serializer.save(plan=plan, owner=coach_owner, order=next_order)
+        task = serializer.save(plan=plan, owner=coach_owner, order=next_order)
+
+        # Notify the assignee that an action was created and assigned to them.
+        actor_name = getattr(self.request.user, "username", "") or ""
+        if task.assignee:
+            recipient = resolve_recipient(task.assignee)
+            notify(
+                recipient,
+                actor_name,
+                "action_created",
+                f"{actor_name} assigned you an action on \"{plan.title}\": {task.title}",
+                target_type="action",
+                target_id=task.id,
+                plan_id=plan.id,
+                action_id=task.id,
+            )
 
 
 class PlanActionsDetailView(generics.RetrieveUpdateDestroyAPIView):

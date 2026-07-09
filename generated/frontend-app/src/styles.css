@@ -536,8 +536,12 @@ button:hover,
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Note: no `forwards`/`both` fill mode here. Retaining the final keyframe's
+   transform would leave a lingering (non-none) transform on these elements,
+   turning `.workspace` into a containing block for `position: fixed` modals
+   and pushing them out of the viewport on tall pages. */
 .app-shell > * {
-  animation: ux-fade-in 0.28s ease both;
+  animation: ux-fade-in 0.28s ease;
 }
 
 /* Respect users who prefer reduced motion: disable transitions and

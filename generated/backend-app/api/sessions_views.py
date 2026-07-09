@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.models import Coachee, CoachingPlan, Message, Session, WeeklyAvailabilityWindow, UnavailablePeriod
+from api.notifications import notify
 from api.permissions import OwnsObjectPermission
 from api.sessions_serializers import SessionsSerializer, WeeklyAvailabilityWindowSerializer, UnavailablePeriodSerializer
 from api.administration_serializers import CoachDirectorySerializer
@@ -203,6 +204,15 @@ class SessionsListView(generics.ListCreateAPIView):
                 plan=None,
                 task_id=None,
                 mentions="",
+            )
+            notify(
+                coach,
+                self.request.user.username,
+                "session_booked",
+                f"{self.request.user.username} booked a session with you: {created.title}",
+                target_type="session",
+                target_id=created.id,
+                plan_id=coaching_plan.id if coaching_plan else None,
             )
             return
 

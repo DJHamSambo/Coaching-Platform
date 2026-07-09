@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createAction, createDiscussion, getCurrentUsername, getPlan, listActions, listDiscussions, listResources, listSessionsForPlan, updateAction, updateActionStatus, updatePlan, updateSession } from '../api';
 import type { AdminCoach, AdminCoachee, CalendarSession, CoachingPlan, CurrentUser, DiscussionItem, PlanAction, ResourceItem, TaskStatus } from '../types';
+import { MentionInput, collectMentions, type MentionCandidate } from './MentionInput';
 import { toLocalDateTimeInputValue } from './calendar/calendarUtils';
 
 interface PlanDetailProps {
@@ -10,6 +11,8 @@ interface PlanDetailProps {
   currentUser: CurrentUser;
   onBack: () => void;
   onPlanUpdated: (plan: CoachingPlan) => void;
+  focusActionId?: string | null;
+  onFocusHandled?: () => void;
 }
 
 const STATUS_LABEL: Record<TaskStatus, string> = {
@@ -20,7 +23,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
 
 const STATUS_OPTIONS: TaskStatus[] = ['backlog', 'inProgress', 'done'];
 
-export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPlanUpdated }: PlanDetailProps) {
+export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPlanUpdated, focusActionId, onFocusHandled }: PlanDetailProps) {
   const [actions, setActions] = useState<PlanAction[]>([]);
   const [discussions, setDiscussions] = useState<DiscussionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,6 +88,14 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
     }
   }, [assignee, assigneeOptions]);
 
+  // People who can be @mentioned in this plan's discussions (the coach and the coachee).
+  const mentionCandidates = useMemo<MentionCandidate[]>(() => {
+    const list: MentionCandidate[] = [];
+    if (plan.coachUsername) list.push({ label: plan.coachUsername, value: plan.coachUsername });
+    if (coacheeName) list.push({ label: coacheeName, value: coacheeName });
+    return list;
+  }, [plan.coachUsername, coacheeName]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -108,6 +119,16 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
 
     return () => clearInterval(interval);
   }, [plan.id]);
+
+  // Deep-link: when arriving from a notification, open the referenced action.
+  useEffect(() => {
+    if (!focusActionId) return;
+    const target = actions.find((action) => action.id === focusActionId);
+    if (target) {
+      setActiveAction(target);
+      onFocusHandled?.();
+    }
+  }, [focusActionId, actions, onFocusHandled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -271,15 +292,17 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
   async function handleSaveAction(): Promise<void> {
     if (!activeAction) return;
     try {
-      const updated = await updateAction(plan.id, activeAction.id, {
-        title: activeAction.title,
-        description: activeAction.description,
-        assignee: activeAction.assignee,
-        dueDate: activeAction.dueDate,
-        status: activeAction.status,
-      });
+      const updated = currentUser.role === 'coachee'
+        ? await updateActionStatus(plan.id, activeAction.id, activeAction.status)
+        : await updateAction(plan.id, activeAction.id, {
+            title: activeAction.title,
+            description: activeAction.description,
+            assignee: activeAction.assignee,
+            dueDate: activeAction.dueDate,
+            status: activeAction.status,
+          });
       setActions((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
-      setActiveAction(updated);
+      setActiveAction(null);
       setError(null);
     } catch {
       setError('Could not update action.');
@@ -295,6 +318,7 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
         planId: plan.id,
         author: currentUsername,
         message: text,
+        mentions: collectMentions(text, mentionCandidates),
       });
       setDiscussions((prev) => [created, ...prev]);
       setPlanDiscussionText('');
@@ -315,6 +339,7 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
         taskId: activeAction.id,
         author: currentUsername,
         message: text,
+        mentions: collectMentions(text, mentionCandidates),
       });
       setDiscussions((prev) => [created, ...prev]);
       setActionDiscussionText('');
@@ -552,7 +577,13 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
           <p className='muted' style={{ margin: '0 0 8px 0' }}>Posting as {currentUsername}</p>
           <label>
             Message
-            <textarea rows={2} value={planDiscussionText} onChange={(event) => setPlanDiscussionText(event.target.value)} />
+            <MentionInput
+              value={planDiscussionText}
+              onChange={setPlanDiscussionText}
+              candidates={mentionCandidates}
+              rows={2}
+              placeholder='Type @ to mention the coach or coachee'
+            />
           </label>
           <button type='submit' className='primary'>Post plan discussion</button>
         </form>
@@ -730,7 +761,13 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
                 <p className='muted' style={{ margin: '0 0 8px 0' }}>Posting as {currentUsername}</p>
                 <label>
                   Message
-                  <textarea rows={2} value={actionDiscussionText} onChange={(event) => setActionDiscussionText(event.target.value)} />
+                  <MentionInput
+                    value={actionDiscussionText}
+                    onChange={setActionDiscussionText}
+                    candidates={mentionCandidates}
+                    rows={2}
+                    placeholder='Type @ to mention the coach or coachee'
+                  />
                 </label>
                 <button type='submit' className='primary'>Post action discussion</button>
               </form>
@@ -747,7 +784,7 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-              <button type='button' className='primary' onClick={() => void handleSaveAction()}>Save action</button>
+              <button type='button' className='primary' onClick={() => void handleSaveAction()}>Save and close</button>
             </div>
           </div>
         </div>
