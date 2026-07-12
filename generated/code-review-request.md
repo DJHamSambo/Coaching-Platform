@@ -6,18 +6,39 @@
 
 | Field | Value |
 |---|---|
-| Commit | `feature/developer-agent-cli-wrapper` |
+| Commit | `feature/notifications-activity-system` |
 | Base | `main` |
-| Timestamp | 2026-06-25T21:24:10.746962+00:00 |
-| Files in scope | 4 |
-| Diff hash | `9fcfcd0a4eee0c38ef377b191bee8605570a933b5cb46313034a7ca73c2578ec` |
+| Timestamp | 2026-07-12T20:15:59.385211+00:00 |
+| Files in scope | 25 |
+| Diff hash | `83ac846747ddd7f774fcf81ba0056815e93c46365427cbf5ef6db7039bc6a2b9` |
 
 ## Files in scope
 
-- `agents/agentic_developer_agent.py`
-- `docs/coaching-plan-kanban-requirements.md`
-- `docs/coaching-platform-requirements.md`
-- `tests/test_agentic_developer_agent.py`
+- `generated/backend-app/api/insights_views.py`
+- `generated/backend-app/api/messages_views.py`
+- `generated/backend-app/api/migrations/0015_notification.py`
+- `generated/backend-app/api/migrations/0016_resource_shared_with_and_more.py`
+- `generated/backend-app/api/models.py`
+- `generated/backend-app/api/notifications.py`
+- `generated/backend-app/api/notifications_serializers.py`
+- `generated/backend-app/api/notifications_views.py`
+- `generated/backend-app/api/plans_views.py`
+- `generated/backend-app/api/resources_serializers.py`
+- `generated/backend-app/api/resources_views.py`
+- `generated/backend-app/api/sessions_views.py`
+- `generated/backend-app/coaching_backend/urls.py`
+- `generated/backend-app/media/resources/revised_gold_coast_marathon_plan.pdf`
+- `generated/code-review-request.md`
+- `generated/code-review-result.json`
+- `generated/frontend-app/src/App.tsx`
+- `generated/frontend-app/src/api.ts`
+- `generated/frontend-app/src/components/ActivityFeed.tsx`
+- `generated/frontend-app/src/components/MentionInput.tsx`
+- `generated/frontend-app/src/components/PlanDetail.tsx`
+- `generated/frontend-app/src/components/ResourceLibrary.tsx`
+- `generated/frontend-app/src/components/calendar/CalendarViews.tsx`
+- `generated/frontend-app/src/styles.css`
+- `generated/frontend-app/src/types.ts`
 
 ## How to review
 
@@ -45,8 +66,8 @@ confirm the verdict matches this diff:
 
 ```json
 {
-  "diff_hash": "9fcfcd0a4eee0c38ef377b191bee8605570a933b5cb46313034a7ca73c2578ec",
-  "commit": "feature/developer-agent-cli-wrapper",
+  "diff_hash": "83ac846747ddd7f774fcf81ba0056815e93c46365427cbf5ef6db7039bc6a2b9",
+  "commit": "feature/notifications-activity-system",
   "base": "main",
   "score": 0,
   "critical": 0,
@@ -68,523 +89,2180 @@ Field rules:
 
 ## Captured diff
 
-### `agents/agentic_developer_agent.py` (new file)
+### `generated/backend-app/api/insights_views.py` (modified)
 
 ```diff
-@@ -0,0 +1,433 @@
-+"""Agentic developer agent (Option D): wrap an external coding-agent CLI.
+@@ -3,6 +3,7 @@ from rest_framework.exceptions import PermissionDenied
+ from django.db.models import Q
+ from api.insights_serializers import InsightsSerializer
+ from api.models import Coachee
++from api.notifications import notify_mentions
+ 
+ 
+ class InsightsListView(generics.ListCreateAPIView):
+@@ -39,7 +40,15 @@ class InsightsListView(generics.ListCreateAPIView):
+             return queryset
+ 
+     def perform_create(self, serializer):
+-        serializer.save(owner=self.request.user)
++        insight = serializer.save(owner=self.request.user)
++        actor_name = insight.author or getattr(self.request.user, "username", "") or ""
++        notify_mentions(
++            actor_name,
++            insight.title,
++            area_label="an insight",
++            target_type="insight",
++            target_id=insight.id,
++        )
+ 
+ 
+ class InsightsDetailView(generics.RetrieveUpdateDestroyAPIView):
+```
+
+### `generated/backend-app/api/messages_views.py` (modified)
+
+```diff
+@@ -1,6 +1,9 @@
+ from rest_framework import generics, permissions
+ from django.contrib.auth.models import User
++from django.db.models import Q
+ from api.messages_serializers import MessagesSerializer
++from api.models import Coachee, CoachingPlan
++from api.notifications import notify_mentions
+ 
+ 
+ def _resolve_owner(request) -> User:
+@@ -11,13 +14,43 @@ def _resolve_owner(request) -> User:
+     return owner
+ 
+ 
++def _linked_coachee_profiles(user):
++    """Coachee profiles linked to this user (FK preferred, legacy name fallback)."""
++    by_user = Coachee.objects.filter(user=user)
++    if by_user.exists():
++        return by_user
++    return Coachee.objects.filter(user__isnull=True, name__iexact=user.username)
 +
-+Unlike :mod:`agents.developer_agent`, which deterministically generates code
-+from a requirements document using templates, this agent delegates the actual
-+code-writing to a *real* autonomous coding-agent CLI (for example ``aider`` or
-+the GitHub Copilot CLI). It builds a well-formed prompt from a natural-language
-+task (plus optional requirements/context files), then invokes the configured
-+CLI as a subprocess against the working tree.
 +
-+Design goals / guardrails
-+-------------------------
-+* **Dry-run by default** — the command and prompt are previewed but nothing is
-+  executed unless ``--execute`` is passed, so it never touches committed code
-+  until you approve.
-+* **No shell injection** — the configured command is tokenised with ``shlex``
-+  and run without ``shell=True``; placeholders are substituted per-token.
-+* **Scoped working directory** — the target directory must exist; the CLI runs
-+  with that directory as its CWD.
-+* **Bounded** — a configurable timeout caps runaway runs.
-+* **Configurable command** — the wrapped CLI is set via ``--agent-command`` or
-+  the ``AGENTIC_DEV_AGENT_CMD`` environment variable, so this is not locked to a
-+  single tool.
++def _is_coachee_user(user) -> bool:
++    if not user or not getattr(user, "is_authenticated", False):
++        return False
++    return _linked_coachee_profiles(user).exists()
 +
-+The wrapped command may contain the placeholders ``{prompt_file}`` (path to a
-+temp file containing the full prompt) and/or ``{cwd}``. If neither
-+``{prompt_file}`` nor ``{prompt}`` appears, the prompt-file path is appended as
-+the final argument.
 +
-+Examples of commands to wrap::
++def _accessible_plan_ids(user):
++    """Plan ids the user participates in (as coach or as the assigned coachee)."""
++    if _is_coachee_user(user):
++        return CoachingPlan.objects.filter(
++            coachee__in=_linked_coachee_profiles(user)
++        ).values_list("id", flat=True)
++    return CoachingPlan.objects.filter(coach=user).values_list("id", flat=True)
 +
-+    aider --yes --message-file {prompt_file}
-+    copilot --prompt-file {prompt_file}
-+    my-coding-agent run --cwd {cwd} --instructions {prompt_file}
 +
-+Stdlib only.
-+"""
+ class MessagesListView(generics.ListCreateAPIView):
+     serializer_class = MessagesSerializer
+     permission_classes = [permissions.AllowAny]
+ 
+     def get_queryset(self):
+-        owner = _resolve_owner(self.request)
+-        queryset = self.serializer_class.Meta.model.objects.filter(owner=owner)
++        user = self.request.user
++        model = self.serializer_class.Meta.model
++        if user and getattr(user, "is_authenticated", False):
++            # A user sees discussions they authored plus every discussion on a
++            # plan they participate in (so coach and coachee share a thread).
++            plan_ids = list(_accessible_plan_ids(user))
++            queryset = model.objects.filter(Q(owner=user) | Q(plan_id__in=plan_ids))
++        else:
++            queryset = model.objects.filter(owner=_resolve_owner(self.request))
+         plan_id = self.request.query_params.get("plan_id")
+         task_id = self.request.query_params.get("task_id")
+         if plan_id:
+@@ -26,8 +59,21 @@ class MessagesListView(generics.ListCreateAPIView):
+             queryset = queryset.filter(task_id=task_id)
+         return queryset.order_by("-created_at")
+ 
 +
+     def perform_create(self, serializer):
+-        serializer.save(owner=_resolve_owner(self.request))
++        message = serializer.save(owner=_resolve_owner(self.request))
++        actor_name = message.author or getattr(self.request.user, "username", "") or ""
++        is_action = bool(message.task_id)
++        notify_mentions(
++            actor_name,
++            message.title,
++            explicit_mentions=message.mentions,
++            area_label="an action discussion" if is_action else "a coaching plan discussion",
++            target_type="action" if is_action else "plan",
++            target_id=message.task_id if is_action else message.plan_id,
++            plan_id=message.plan_id,
++            action_id=message.task_id if is_action else None,
++        )
+ 
+ 
+ class MessagesDetailView(generics.RetrieveUpdateDestroyAPIView):
+```
+
+### `generated/backend-app/api/migrations/0015_notification.py` (new file)
+
+```diff
+@@ -0,0 +1,36 @@
++# Generated by Django 6.0.6 on 2026-07-09 20:26
++
++import django.db.models.deletion
++from django.conf import settings
++from django.db import migrations, models
++
++
++class Migration(migrations.Migration):
++
++    dependencies = [
++        ('api', '0014_userprofile'),
++        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
++    ]
++
++    operations = [
++        migrations.CreateModel(
++            name='Notification',
++            fields=[
++                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('actor_name', models.CharField(blank=True, default='', help_text='Display name of who triggered the notification', max_length=150)),
++                ('notification_type', models.CharField(choices=[('mention', 'Mention'), ('session_booked', 'Session Booked'), ('task_assigned', 'Task Assigned'), ('action_created', 'Action Created')], max_length=32)),
++                ('message', models.CharField(max_length=500)),
++                ('target_type', models.CharField(blank=True, default='', help_text='plan | action | session | insight', max_length=32)),
++                ('target_id', models.IntegerField(blank=True, null=True)),
++                ('plan_id', models.IntegerField(blank=True, null=True)),
++                ('action_id', models.IntegerField(blank=True, null=True)),
++                ('is_read', models.BooleanField(default=False)),
++                ('created_at', models.DateTimeField(auto_now_add=True)),
++                ('recipient', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='notifications', to=settings.AUTH_USER_MODEL)),
++            ],
++            options={
++                'ordering': ['-created_at'],
++                'indexes': [models.Index(fields=['recipient', '-created_at'], name='api_notific_recipie_5c719b_idx')],
++            },
++        ),
++    ]
+```
+
+### `generated/backend-app/api/migrations/0016_resource_shared_with_and_more.py` (new file)
+
+```diff
+@@ -0,0 +1,25 @@
++# Generated by Django 6.0.6 on 2026-07-12 19:54
++
++from django.conf import settings
++from django.db import migrations, models
++
++
++class Migration(migrations.Migration):
++
++    dependencies = [
++        ('api', '0015_notification'),
++        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
++    ]
++
++    operations = [
++        migrations.AddField(
++            model_name='resource',
++            name='shared_with',
++            field=models.ManyToManyField(blank=True, help_text='Users this resource has been explicitly shared with', related_name='shared_resources', to=settings.AUTH_USER_MODEL),
++        ),
++        migrations.AlterField(
++            model_name='notification',
++            name='notification_type',
++            field=models.CharField(choices=[('mention', 'Mention'), ('session_booked', 'Session Booked'), ('task_assigned', 'Task Assigned'), ('action_created', 'Action Created'), ('resource_added', 'Resource Added')], max_length=32),
++        ),
++    ]
+```
+
+### `generated/backend-app/api/models.py` (modified)
+
+```diff
+@@ -152,6 +152,35 @@ class Insight(models.Model):
+     updated_at = models.DateTimeField(auto_now=True)
+ 
+ 
++class Notification(models.Model):
++    """An activity notification delivered to a coach or coachee."""
++    TYPE_CHOICES = [
++        ("mention", "Mention"),
++        ("session_booked", "Session Booked"),
++        ("task_assigned", "Task Assigned"),
++        ("action_created", "Action Created"),
++        ("resource_added", "Resource Added"),
++    ]
++    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
++    actor_name = models.CharField(max_length=150, blank=True, default="", help_text="Display name of who triggered the notification")
++    notification_type = models.CharField(max_length=32, choices=TYPE_CHOICES)
++    message = models.CharField(max_length=500)
++    # Navigation context — where clicking the notification should take the user
++    target_type = models.CharField(max_length=32, blank=True, default="", help_text="plan | action | session | insight")
++    target_id = models.IntegerField(null=True, blank=True)
++    plan_id = models.IntegerField(null=True, blank=True)
++    action_id = models.IntegerField(null=True, blank=True)
++    is_read = models.BooleanField(default=False)
++    created_at = models.DateTimeField(auto_now_add=True)
++
++    class Meta:
++        ordering = ["-created_at"]
++        indexes = [models.Index(fields=["recipient", "-created_at"])]
++
++    def __str__(self) -> str:
++        return f"Notification<{self.notification_type} -> {self.recipient.username}>"
++
++
+ class Resource(models.Model):
+     CATEGORY_CHOICES = [
+         ("guide", "Guide"),
+@@ -174,6 +203,12 @@ class Resource(models.Model):
+         help_text="Optional coaching plan this resource is shared against",
+     )
+     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="resources")
++    shared_with = models.ManyToManyField(
++        User,
++        blank=True,
++        related_name="shared_resources",
++        help_text="Users this resource has been explicitly shared with",
++    )
+     created_at = models.DateTimeField(auto_now_add=True)
+     updated_at = models.DateTimeField(auto_now=True)
+```
+
+### `generated/backend-app/api/notifications.py` (new file)
+
+```diff
+@@ -0,0 +1,127 @@
++"""Helpers for creating activity notifications for coaches and coachees."""
 +from __future__ import annotations
 +
-+import argparse
-+import json
-+import os
-+import shlex
-+import subprocess
-+import sys
-+import tempfile
-+from dataclasses import asdict, dataclass, field, replace
-+from pathlib import Path
-+from typing import Callable, Sequence
++import re
++from typing import Iterable, Optional
++
++from django.contrib.auth.models import User
++
++from api.models import Coachee, Notification
++
++_MENTION_RE = re.compile(r"@([\w.@+-]+)")
 +
 +
-+# Default command used when neither --agent-command nor AGENTIC_DEV_AGENT_CMD is
-+# set. aider is a widely-used autonomous coding CLI that can read a message file
-+# and apply edits non-interactively with --yes.
-+DEFAULT_AGENT_COMMAND = "aider --yes --message-file {prompt_file}"
++def resolve_recipient(name: str) -> Optional[User]:
++    """Resolve a mention/assignee name to a User.
 +
-+DEFAULT_TIMEOUT_SECONDS = 1800
++    Names may be a login username (coach or coachee account) or a coachee's
++    display name. Tries a direct username match first, then falls back to a
++    Coachee display-name match with a linked user account.
++    """
++    if not name:
++        return None
++    name = name.strip()
++    if not name:
++        return None
 +
-+REPORT_FILENAME = "agentic-developer-report.md"
++    user = User.objects.filter(username__iexact=name).first()
++    if user:
++        return user
 +
-+# A subprocess.run-compatible callable, injected for testability.
-+Runner = Callable[..., subprocess.CompletedProcess]
-+
-+
-+@dataclass(frozen=True)
-+class AgenticRunResult:
-+    """Outcome of a single agentic run."""
-+
-+    command: list[str]
-+    prompt: str
-+    prompt_file: str
-+    cwd: str
-+    dry_run: bool
-+    executed: bool
-+    returncode: int | None = None
-+    stdout: str = ""
-+    stderr: str = ""
-+    timed_out: bool = False
-+    report_path: str | None = None
-+    warnings: list[str] = field(default_factory=list)
-+
-+    @property
-+    def succeeded(self) -> bool:
-+        return self.executed and not self.timed_out and self.returncode == 0
-+
-+    def to_dict(self) -> dict[str, object]:
-+        data = asdict(self)
-+        data["succeeded"] = self.succeeded
-+        return data
++    coachee = Coachee.objects.filter(name__iexact=name, user__isnull=False).first()
++    if coachee and coachee.user:
++        return coachee.user
++    return None
 +
 +
-+class AgenticDeveloperAgentError(RuntimeError):
-+    """Raised for invalid configuration or inputs."""
++def notify(
++    recipient: Optional[User],
++    actor_name: str,
++    notification_type: str,
++    message: str,
++    *,
++    target_type: str = "",
++    target_id: Optional[int] = None,
++    plan_id: Optional[int] = None,
++    action_id: Optional[int] = None,
++) -> Optional[Notification]:
++    """Create a single notification, skipping self-notifications and no-ops."""
++    if recipient is None:
++        return None
++    # Never notify the actor about their own action.
++    if actor_name and recipient.username.lower() == actor_name.strip().lower():
++        return None
++    return Notification.objects.create(
++        recipient=recipient,
++        actor_name=actor_name or "",
++        notification_type=notification_type,
++        message=message[:500],
++        target_type=target_type,
++        target_id=target_id,
++        plan_id=plan_id,
++        action_id=action_id,
++    )
 +
 +
-+class AgenticDeveloperAgent:
-+    """Wraps an external autonomous coding-agent CLI behind a safe interface."""
++def extract_mentions(text: str) -> list[str]:
++    """Pull unique @mention tokens out of free text."""
++    if not text:
++        return []
++    seen: list[str] = []
++    for token in _MENTION_RE.findall(text):
++        if token not in seen:
++            seen.append(token)
++    return seen
 +
-+    VERSION = "0.1.0"
 +
-+    def __init__(
-+        self,
-+        agent_command: str | None = None,
-+        runner: Runner | None = None,
-+    ) -> None:
-+        self.agent_command = (
-+            agent_command
-+            or os.environ.get("AGENTIC_DEV_AGENT_CMD")
-+            or DEFAULT_AGENT_COMMAND
-+        ).strip()
-+        if not self.agent_command:
-+            raise AgenticDeveloperAgentError("agent command must not be empty")
-+        self._runner: Runner = runner or subprocess.run
++def notify_mentions(
++    actor_name: str,
++    text: str,
++    *,
++    explicit_mentions: str = "",
++    area_label: str,
++    target_type: str = "",
++    target_id: Optional[int] = None,
++    plan_id: Optional[int] = None,
++    action_id: Optional[int] = None,
++    extra_candidates: Optional[Iterable[str]] = None,
++) -> None:
++    """Notify every mentioned user in a discussion message.
 +
-+    # -- prompt construction ------------------------------------------------
++    Mentions are taken from the comma-separated ``explicit_mentions`` field when
++    present, otherwise parsed from ``text``. ``extra_candidates`` lets callers
++    supply already-known recipient names (e.g. the plan coach) whose mention
++    should still resolve even when written as a display name.
++    """
++    names: list[str] = []
++    for chunk in (explicit_mentions or "").split(","):
++        chunk = chunk.strip()
++        if chunk and chunk not in names:
++            names.append(chunk)
++    if not names:
++        names = extract_mentions(text)
 +
-+    def build_prompt(
-+        self,
-+        task: str,
-+        requirements_text: str | None = None,
-+        context_files: Sequence[str] | None = None,
-+    ) -> str:
-+        task = (task or "").strip()
-+        if not task:
-+            raise AgenticDeveloperAgentError("task description must not be empty")
++    if not names:
++        return
 +
-+        sections: list[str] = [
-+            "# Coding task",
-+            "",
-+            "You are an autonomous coding agent working in an existing repository.",
-+            "Implement the task below. Make focused, correct changes, run the",
-+            "project's tests where possible, and avoid touching unrelated code.",
-+            "",
-+            "## Task",
-+            "",
-+            task,
-+        ]
++    candidate_lookup = {c.lower(): c for c in (extra_candidates or []) if c}
 +
-+        if requirements_text and requirements_text.strip():
-+            sections += [
-+                "",
-+                "## Requirements context",
-+                "",
-+                requirements_text.strip(),
-+            ]
++    for name in names:
++        recipient = resolve_recipient(name)
++        if recipient is None and name.lower() in candidate_lookup:
++            recipient = resolve_recipient(candidate_lookup[name.lower()])
++        if recipient is None:
++            continue
++        preview = text.strip()
++        if len(preview) > 140:
++            preview = preview[:137] + "..."
++        notify(
++            recipient,
++            actor_name,
++            "mention",
++            f"{actor_name} mentioned you in {area_label}: \"{preview}\"",
++            target_type=target_type,
++            target_id=target_id,
++            plan_id=plan_id,
++            action_id=action_id,
++        )
+```
+
+### `generated/backend-app/api/notifications_serializers.py` (new file)
+
+```diff
+@@ -0,0 +1,31 @@
++from rest_framework import serializers
 +
-+        if context_files:
-+            listed = "\n".join(f"- {path}" for path in context_files)
-+            sections += [
-+                "",
-+                "## Relevant files",
-+                "",
-+                listed,
-+            ]
++from api.models import Notification
 +
-+        sections += [
-+            "",
-+            "## Constraints",
-+            "",
-+            "- Keep changes minimal and idiomatic for this codebase.",
-+            "- Do not modify version control history or delete unrelated files.",
-+            "- Prefer adding/updating tests for new behaviour.",
-+            "",
-+        ]
-+        return "\n".join(sections)
 +
-+    # -- command construction ----------------------------------------------
++class NotificationSerializer(serializers.ModelSerializer):
++    class Meta:
++        model = Notification
++        fields = (
++            "id",
++            "actor_name",
++            "notification_type",
++            "message",
++            "target_type",
++            "target_id",
++            "plan_id",
++            "action_id",
++            "is_read",
++            "created_at",
++        )
++        read_only_fields = (
++            "id",
++            "actor_name",
++            "notification_type",
++            "message",
++            "target_type",
++            "target_id",
++            "plan_id",
++            "action_id",
++            "created_at",
++        )
+```
+
+### `generated/backend-app/api/notifications_views.py` (new file)
+
+```diff
+@@ -0,0 +1,36 @@
++from rest_framework import generics, permissions
++from rest_framework.decorators import api_view, permission_classes
++from rest_framework.permissions import IsAuthenticated
++from rest_framework.request import Request
++from rest_framework.response import Response
 +
-+    def build_command(self, prompt_file: Path, cwd: Path, prompt: str) -> list[str]:
-+        try:
-+            tokens = shlex.split(self.agent_command)
-+        except ValueError as exc:
-+            raise AgenticDeveloperAgentError(
-+                f"could not parse agent command {self.agent_command!r}: {exc}"
-+            ) from exc
-+        if not tokens:
-+            raise AgenticDeveloperAgentError("agent command produced no tokens")
++from api.models import Notification
++from api.notifications_serializers import NotificationSerializer
 +
-+        substitutions = {
-+            "{prompt_file}": str(prompt_file),
-+            "{cwd}": str(cwd),
-+            "{prompt}": prompt,
++
++class NotificationsListView(generics.ListAPIView):
++    """List the current user's notifications, most recent first."""
++    serializer_class = NotificationSerializer
++    permission_classes = [permissions.IsAuthenticated]
++
++    def get_queryset(self):
++        queryset = Notification.objects.filter(recipient=self.request.user)
++        if self.request.query_params.get("unread") in ("1", "true", "True"):
++            queryset = queryset.filter(is_read=False)
++        return queryset.order_by("-created_at")
++
++
++class NotificationsDetailView(generics.RetrieveUpdateDestroyAPIView):
++    """Retrieve, mark as read (PATCH is_read), or delete a notification."""
++    serializer_class = NotificationSerializer
++    permission_classes = [permissions.IsAuthenticated]
++
++    def get_queryset(self):
++        return Notification.objects.filter(recipient=self.request.user)
++
++
++@api_view(["POST"])
++@permission_classes([IsAuthenticated])
++def mark_all_read(request: Request) -> Response:
++    updated = Notification.objects.filter(recipient=request.user, is_read=False).update(is_read=True)
++    return Response({"updated": updated})
+```
+
+### `generated/backend-app/api/plans_views.py` (modified)
+
+```diff
+@@ -4,6 +4,7 @@ from rest_framework.exceptions import PermissionDenied
+ from django.contrib.auth.models import User
+ from api.plans_serializers import CoachingPlanSerializer, CoachingPlanListSerializer, ActionSerializer
+ from api.models import Coachee, CoachingPlan, Task
++from api.notifications import notify, resolve_recipient
+ 
+ 
+ def _resolve_owner(request) -> User:
+@@ -128,7 +129,22 @@ class PlanActionsListView(generics.ListCreateAPIView):
+         # Auto-assign order as next in sequence
+         last = Task.objects.filter(plan=plan).order_by("-order").first()
+         next_order = (last.order + 1) if last else 0
+-        serializer.save(plan=plan, owner=coach_owner, order=next_order)
++        task = serializer.save(plan=plan, owner=coach_owner, order=next_order)
++
++        # Notify the assignee that an action was created and assigned to them.
++        actor_name = getattr(self.request.user, "username", "") or ""
++        if task.assignee:
++            recipient = resolve_recipient(task.assignee)
++            notify(
++                recipient,
++                actor_name,
++                "action_created",
++                f"{actor_name} assigned you an action on \"{plan.title}\": {task.title}",
++                target_type="action",
++                target_id=task.id,
++                plan_id=plan.id,
++                action_id=task.id,
++            )
+ 
+ 
+ class PlanActionsDetailView(generics.RetrieveUpdateDestroyAPIView):
+```
+
+### `generated/backend-app/api/resources_serializers.py` (modified)
+
+```diff
+@@ -1,4 +1,5 @@
+ from rest_framework import serializers
++from django.contrib.auth.models import User
+ from api.models import Resource
+@@ -7,6 +8,12 @@ class ResourcesSerializer(serializers.ModelSerializer):
+     file_name = serializers.SerializerMethodField()
+     owner_username = serializers.CharField(source="owner.username", read_only=True)
+     plan_title = serializers.CharField(source="plan.title", read_only=True, default=None)
++    shared_with = serializers.SlugRelatedField(
++        slug_field="username",
++        queryset=User.objects.all(),
++        many=True,
++        required=False,
++    )
+ 
+     class Meta:
+         model = Resource
+@@ -18,6 +25,7 @@ class ResourcesSerializer(serializers.ModelSerializer):
+             "scope",
+             "plan",
+             "plan_title",
++            "shared_with",
+             "file",
+             "file_url",
+             "file_name",
+```
+
+### `generated/backend-app/api/resources_views.py` (modified)
+
+```diff
+@@ -3,6 +3,7 @@ from rest_framework import generics, permissions
+ from rest_framework.exceptions import PermissionDenied
+ 
+ from api.models import CoachingPlan, Resource
++from api.notifications import notify
+ from api.plans_views import _is_coachee_user, _linked_coachee_profiles, _resolve_owner
+ from api.resources_serializers import ResourcesSerializer
+@@ -30,7 +31,7 @@ class ResourcesListView(generics.ListCreateAPIView):
+         user = self.request.user
+         accessible_plan_ids = _accessible_plans(self.request).values_list("id", flat=True)
+         queryset = Resource.objects.filter(
+-            Q(owner=user) | Q(plan_id__in=list(accessible_plan_ids))
++            Q(owner=user) | Q(plan_id__in=list(accessible_plan_ids)) | Q(shared_with=user)
+         ).distinct()
+         plan_id = self.request.query_params.get("plan")
+         if plan_id:
+@@ -39,7 +40,19 @@ class ResourcesListView(generics.ListCreateAPIView):
+ 
+     def perform_create(self, serializer):
+         _validate_plan_link(self.request, serializer.validated_data.get("plan"))
+-        serializer.save(owner=self.request.user)
++        resource = serializer.save(owner=self.request.user)
++
++        # Notify each user the resource was explicitly shared with.
++        actor_name = getattr(self.request.user, "username", "") or ""
++        for recipient in resource.shared_with.all():
++            notify(
++                recipient,
++                actor_name,
++                "resource_added",
++                f'{actor_name} shared a resource with you: {resource.title}',
++                target_type="resource",
++                target_id=resource.id,
++            )
+ 
+ 
+ class ResourcesDetailView(generics.RetrieveUpdateDestroyAPIView):
+@@ -50,7 +63,7 @@ class ResourcesDetailView(generics.RetrieveUpdateDestroyAPIView):
+         user = self.request.user
+         accessible_plan_ids = _accessible_plans(self.request).values_list("id", flat=True)
+         return Resource.objects.filter(
+-            Q(owner=user) | Q(plan_id__in=list(accessible_plan_ids))
++            Q(owner=user) | Q(plan_id__in=list(accessible_plan_ids)) | Q(shared_with=user)
+         ).distinct()
+ 
+     def perform_update(self, serializer):
+```
+
+### `generated/backend-app/api/sessions_views.py` (modified)
+
+```diff
+@@ -10,6 +10,7 @@ from rest_framework.response import Response
+ from rest_framework.views import APIView
+ 
+ from api.models import Coachee, CoachingPlan, Message, Session, WeeklyAvailabilityWindow, UnavailablePeriod
++from api.notifications import notify, resolve_recipient
+ from api.permissions import OwnsObjectPermission
+ from api.sessions_serializers import SessionsSerializer, WeeklyAvailabilityWindowSerializer, UnavailablePeriodSerializer
+ from api.administration_serializers import CoachDirectorySerializer
+@@ -204,12 +205,35 @@ class SessionsListView(generics.ListCreateAPIView):
+                 task_id=None,
+                 mentions="",
+             )
++            notify(
++                coach,
++                self.request.user.username,
++                "session_booked",
++                f"{self.request.user.username} booked a session with you: {created.title}",
++                target_type="session",
++                target_id=created.id,
++                plan_id=coaching_plan.id if coaching_plan else None,
++            )
+             return
+ 
+         # Coach creating session
+-        coachee_id = serializer.validated_data.get("coachee")
+-        coaching_plan = _resolve_coaching_plan(self.request, coachee_id)
+-        serializer.save(owner=self.request.user, requested_by="coach", coaching_plan=coaching_plan)
++        coachee_obj = serializer.validated_data.get("coachee")
++        coaching_plan = _resolve_coaching_plan(self.request, coachee_obj)
++        created = serializer.save(owner=self.request.user, requested_by="coach", coaching_plan=coaching_plan)
++
++        # Notify the coachee that the coach booked a session with them.
++        recipient = None
++        if coachee_obj is not None:
++            recipient = getattr(coachee_obj, "user", None) or resolve_recipient(getattr(coachee_obj, "name", ""))
++        notify(
++            recipient,
++            self.request.user.username,
++            "session_booked",
++            f"{self.request.user.username} booked a session with you: {created.title}",
++            target_type="session",
++            target_id=created.id,
++            plan_id=coaching_plan.id if coaching_plan else None,
++        )
+ 
+ 
+ class SessionsDetailView(generics.RetrieveUpdateDestroyAPIView):
+```
+
+### `generated/backend-app/coaching_backend/urls.py` (modified)
+
+```diff
+@@ -12,6 +12,7 @@ from api.messages_views import MessagesListView, MessagesDetailView
+ from api.coachees_views import CoacheesListView, CoacheesDetailView
+ from api.plans_views import PlansListView, PlansDetailView, PlanActionsListView, PlanActionsDetailView
+ from api.insights_views import InsightsListView, InsightsDetailView
++from api.notifications_views import NotificationsListView, NotificationsDetailView, mark_all_read
+ from api.sessions_views import (
+     MyCalendarCoachesListView,
+     SessionsListView,
+@@ -62,6 +63,10 @@ urlpatterns = [
+     path("api/messages/<int:pk>/", MessagesDetailView.as_view(), name="messages-detail"),
+     path("api/insights/", InsightsListView.as_view(), name="insights-list"),
+     path("api/insights/<int:pk>/", InsightsDetailView.as_view(), name="insights-detail"),
++    # Activity notifications
++    path("api/notifications/", NotificationsListView.as_view(), name="notifications-list"),
++    path("api/notifications/mark-all-read/", mark_all_read, name="notifications-mark-all-read"),
++    path("api/notifications/<int:pk>/", NotificationsDetailView.as_view(), name="notifications-detail"),
+     # Shared coaching resources / documents (optionally linked to a plan)
+     path("api/resources/", ResourcesListView.as_view(), name="resources-list"),
+     path("api/resources/<int:pk>/", ResourcesDetailView.as_view(), name="resources-detail"),
+```
+
+### `generated/backend-app/media/resources/revised_gold_coast_marathon_plan.pdf` (new file)
+
+```diff
+@@ -0,0 +1,101 @@
++   Revised Gold Coast Marathon Training Plan
++
++Updated for: No UTA50 | Gold Coast Marathon – 5 July | Goal: Sub-3 Marathon
++
++Key Changes
++• No UTA fatigue to manage → more marathon-specific work
++• Increased specificity at marathon pace
++• Slightly higher long-run quality
++• Maintained 5-day running structure with Monday & Friday off/cross-training
++
++Week 1
++
++Focus: Marathon rhythm and threshold strength
++
++Day                       Session
++
++Monday                    Rest / mobility / light cross-training
++Tuesday                   3 × 3 km @ 4:00–4:03/km with 3 min easy jog recovery
++Wednesday                 10–12 km easy @ 4:55–5:15/km
++Thursday                  10 km continuous @ marathon pace (~4:15/km)
++Friday                    Rest
++Saturday                  28 km long run: first 18 km easy, final 10 km @ 4:15–4:18/km
++Sunday                    12–14 km easy recovery
++
++Week 2
++
++Focus: Peak aerobic load
++
++Day                       Session
++
++Monday                    Rest
++Tuesday                   6 × 1 km @ 3:50–3:55/km with 90 sec jog recovery
++Wednesday                 12 km easy
++Thursday                  2 × 6 km @ 4:12–4:15/km with 3 min float jog
++Friday                    Rest
++Saturday                  32 km long run: first 20 km easy, final 12 km @ MP
++Sunday                    10–12 km very easy
++
++Week 3                    Session
++
++Focus: Peak specificity   Rest / mobility
++     Day                  8 km tempo @ 4:02–4:05/km
++                          10 km easy
++     Monday
++     Tuesday
++     Wednesday
++Thursday            14 km continuous @ marathon pace (~4:14–4:16/km)
++Friday              Rest
++Saturday            34 km long run: final 12 km @ MP if feeling strong
++Sunday              10 km recovery
++
++Week 4
++
++Focus: Absorb fitness and sharpen
++
++Day                 Session
++
++Monday              Rest
++Tuesday             5 × 1 km @ 10k pace (~3:50/km)
++Wednesday           8–10 km easy
++Thursday            10 km @ marathon pace
++Friday              Rest
++Saturday            26 km steady aerobic long run
++Sunday              12 km easy
++
++Week 5              Session
++
++Focus: Begin taper  Rest
++                    4 × 1 km @ marathon pace
++     Day            8 km easy
++                    8 km relaxed with 4 × 20 sec strides
++     Monday         Rest
++     Tuesday        18–20 km easy
++     Wednesday      10 km easy
++     Thursday
++     Friday
++     Saturday
++     Sunday
++
++Week 6 – Race Week
++
++Focus: Fresh legs and confidence
++
++Day                 Session
++
++Monday              Rest
++Tuesday             3 × 1 km @ MP with full recovery
++Wednesday           8 km easy
++Thursday            6 km easy + strides
++Friday              Rest
++Saturday            4–5 km shakeout
++Sunday – 5 July     Gold Coast Marathon
++Key Training Notes
++
++• Goal marathon pace: ~4:14–4:15/km
++• Easy pace: ~4:55–5:20/km
++• Recovery jogs between reps: ~5:15–6:00/km
++• Long runs are the highest priority sessions
++• Fuel long runs exactly like race day (60–90g carbs/hour)
++• Conservative first half marathon split is recommended on race day
++
+```
+
+### `generated/code-review-request.md` (new file)
+
+```diff
+@@ -0,0 +1,590 @@
++# Code Review Request (chat handoff)
++
++> Generated by code_review_agent.py for an interactive chat agent.
++> No external model was called — perform this review directly using full
++> repository context (read related files, run tests, trace callers).
++
++| Field | Value |
++|---|---|
++| Commit | `feature/developer-agent-cli-wrapper` |
++| Base | `main` |
++| Timestamp | 2026-06-25T21:24:10.746962+00:00 |
++| Files in scope | 4 |
++| Diff hash | `9fcfcd0a4eee0c38ef377b191bee8605570a933b5cb46313034a7ca73c2578ec` |
++
++## Files in scope
++
++- `agents/agentic_developer_agent.py`
++- `docs/coaching-plan-kanban-requirements.md`
++- `docs/coaching-platform-requirements.md`
++- `tests/test_agentic_developer_agent.py`
++
++## How to review
++
++Review this change as if the user asked you directly in chat. Do not limit
++yourself to the diff below — open the surrounding files, check callers and
++tests, and verify your findings against the actual codebase.
++
++Assess across five dimensions and call out the most important issues first:
++
++1. **coding_standards** — style, naming, structure, language idioms
++2. **security** — OWASP Top 10, secret leakage, injection, auth/authz flaws
++3. **maintainability** — complexity, coupling, readability, test coverage
++4. **technical_debt** — shortcuts, TODOs, dead code, duplication
++5. **codebase_impact** — API surface changes, breaking contracts, dep effects
++
++For each finding give: file/line, severity (critical/high/medium/low/info),
++the problem, and a concrete suggested fix. End with a short overall
++assessment and a 0–10 quality score.
++
++## Result contract (required for the CI gate)
++
++After reviewing, write your verdict to `generated/code-review-result.json` as JSON with
++exactly these fields. Copy `diff_hash` verbatim from above so the gate can
++confirm the verdict matches this diff:
++
++```json
++{
++  "diff_hash": "9fcfcd0a4eee0c38ef377b191bee8605570a933b5cb46313034a7ca73c2578ec",
++  "commit": "feature/developer-agent-cli-wrapper",
++  "base": "main",
++  "score": 0,
++  "critical": 0,
++  "high": 0,
++  "medium": 0,
++  "low": 0,
++  "verdict": "pass",
++  "summary": "<2-4 sentence overall assessment>"
++}
++```
++
++Field rules:
++
++- `critical`/`high`/`medium`/`low`: integer counts of findings at each severity.
++- `score`: integer 0–10 (10 = production-perfect).
++- `verdict`: `"pass"` or `"fail"`. The merge is BLOCKED if `verdict` is
++  `"fail"` or if any of `critical`/`high`/`medium` is greater than zero.
++- `diff_hash`: must equal the value above, or the gate treats the result as stale.
++
++## Captured diff
++
++### `agents/agentic_developer_agent.py` (new file)
++
++```diff
++@@ -0,0 +1,433 @@
+++"""Agentic developer agent (Option D): wrap an external coding-agent CLI.
+++
+++Unlike :mod:`agents.developer_agent`, which deterministically generates code
+++from a requirements document using templates, this agent delegates the actual
+++code-writing to a *real* autonomous coding-agent CLI (for example ``aider`` or
+++the GitHub Copilot CLI). It builds a well-formed prompt from a natural-language
+++task (plus optional requirements/context files), then invokes the configured
+++CLI as a subprocess against the working tree.
+++
+++Design goals / guardrails
+++-------------------------
+++* **Dry-run by default** — the command and prompt are previewed but nothing is
+++  executed unless ``--execute`` is passed, so it never touches committed code
+++  until you approve.
+++* **No shell injection** — the configured command is tokenised with ``shlex``
+++  and run without ``shell=True``; placeholders are substituted per-token.
+++* **Scoped working directory** — the target directory must exist; the CLI runs
+++  with that directory as its CWD.
+++* **Bounded** — a configurable timeout caps runaway runs.
+++* **Configurable command** — the wrapped CLI is set via ``--agent-command`` or
+++  the ``AGENTIC_DEV_AGENT_CMD`` environment variable, so this is not locked to a
+++  single tool.
+++
+++The wrapped command may contain the placeholders ``{prompt_file}`` (path to a
+++temp file containing the full prompt) and/or ``{cwd}``. If neither
+++``{prompt_file}`` nor ``{prompt}`` appears, the prompt-file path is appended as
+++the final argument.
+++
+++Examples of commands to wrap::
+++
+++    aider --yes --message-file {prompt_file}
+++    copilot --prompt-file {prompt_file}
+++    my-coding-agent run --cwd {cwd} --instructions {prompt_file}
+++
+++Stdlib only.
+++"""
+++
+++from __future__ import annotations
+++
+++import argparse
+++import json
+++import os
+++import shlex
+++import subprocess
+++import sys
+++import tempfile
+++from dataclasses import asdict, dataclass, field, replace
+++from pathlib import Path
+++from typing import Callable, Sequence
+++
+++
+++# Default command used when neither --agent-command nor AGENTIC_DEV_AGENT_CMD is
+++# set. aider is a widely-used autonomous coding CLI that can read a message file
+++# and apply edits non-interactively with --yes.
+++DEFAULT_AGENT_COMMAND = "aider --yes --message-file {prompt_file}"
+++
+++DEFAULT_TIMEOUT_SECONDS = 1800
+++
+++REPORT_FILENAME = "agentic-developer-report.md"
+++
+++# A subprocess.run-compatible callable, injected for testability.
+++Runner = Callable[..., subprocess.CompletedProcess]
+++
+++
+++@dataclass(frozen=True)
+++class AgenticRunResult:
+++    """Outcome of a single agentic run."""
+++
+++    command: list[str]
+++    prompt: str
+++    prompt_file: str
+++    cwd: str
+++    dry_run: bool
+++    executed: bool
+++    returncode: int | None = None
+++    stdout: str = ""
+++    stderr: str = ""
+++    timed_out: bool = False
+++    report_path: str | None = None
+++    warnings: list[str] = field(default_factory=list)
+++
+++    @property
+++    def succeeded(self) -> bool:
+++        return self.executed and not self.timed_out and self.returncode == 0
+++
+++    def to_dict(self) -> dict[str, object]:
+++        data = asdict(self)
+++        data["succeeded"] = self.succeeded
+++        return data
+++
+++
+++class AgenticDeveloperAgentError(RuntimeError):
+++    """Raised for invalid configuration or inputs."""
+++
+++
+++class AgenticDeveloperAgent:
+++    """Wraps an external autonomous coding-agent CLI behind a safe interface."""
+++
+++    VERSION = "0.1.0"
+++
+++    def __init__(
+++        self,
+++        agent_command: str | None = None,
+++        runner: Runner | None = None,
+++    ) -> None:
+++        self.agent_command = (
+++            agent_command
+++            or os.environ.get("AGENTIC_DEV_AGENT_CMD")
+++            or DEFAULT_AGENT_COMMAND
+++        ).strip()
+++        if not self.agent_command:
+++            raise AgenticDeveloperAgentError("agent command must not be empty")
+++        self._runner: Runner = runner or subprocess.run
+++
+++    # -- prompt construction ------------------------------------------------
+++
+++    def build_prompt(
+++        self,
+++        task: str,
+++        requirements_text: str | None = None,
+++        context_files: Sequence[str] | None = None,
+++    ) -> str:
+++        task = (task or "").strip()
+++        if not task:
+++            raise AgenticDeveloperAgentError("task description must not be empty")
+++
+++        sections: list[str] = [
+++            "# Coding task",
+++            "",
+++            "You are an autonomous coding agent working in an existing repository.",
+++            "Implement the task below. Make focused, correct changes, run the",
+++            "project's tests where possible, and avoid touching unrelated code.",
+++            "",
+++            "## Task",
+++            "",
+++            task,
+++        ]
+++
+++        if requirements_text and requirements_text.strip():
+++            sections += [
+++                "",
+++                "## Requirements context",
+++                "",
+++                requirements_text.strip(),
+++            ]
+++
+++        if context_files:
+++            listed = "\n".join(f"- {path}" for path in context_files)
+++            sections += [
+++                "",
+++                "## Relevant files",
+++                "",
+++                listed,
+
+```
+
+### `generated/code-review-result.json` (new file)
+
+```diff
+@@ -0,0 +1,12 @@
++{
++  "diff_hash": "9fcfcd0a4eee0c38ef377b191bee8605570a933b5cb46313034a7ca73c2578ec",
++  "commit": "feature/developer-agent-cli-wrapper",
++  "base": "main",
++  "score": 9,
++  "critical": 0,
++  "high": 0,
++  "medium": 0,
++  "low": 1,
++  "verdict": "pass",
++  "summary": "Adds an agentic CLI-wrapper developer agent (Option D) that delegates coding tasks to an external autonomous coding-agent CLI, plus syncs the two requirements docs to the current codebase. Security is sound: the wrapped command is tokenised with shlex and executed without shell=True (no shell injection), placeholders are substituted per-token, the working directory must exist and is warned about if outside the repo root, runs are bounded by a timeout, and execution is dry-run by default (requires explicit --execute). The wrapped command is operator-supplied trusted config (env var or flag), an injectable runner keeps it testable, and the temporary prompt file is cleaned up in a finally block. 13 new unit tests plus the existing developer-agent tests (16 total) pass; the deterministic generator is untouched. Doc edits are accurate to the models/routes and honestly flag not-yet-implemented items (external calendar sync, mention notifications). Low-severity note: the run report is written into the target cwd, which could land inside a generated app dir."
++}
+```
+
+### `generated/frontend-app/src/App.tsx` (modified)
+
+```diff
+@@ -1,10 +1,11 @@
+-import { useEffect, useMemo, useState } from 'react';
++import { useCallback, useEffect, useMemo, useState } from 'react';
+ import { PlanList } from './components/PlanList';
+ import { PlanDetail } from './components/PlanDetail';
+ import { CalendarPanel } from './components/CalendarPanel';
+ import { AdministrationPanel } from './components/AdministrationPanel';
+ import { InsightsJournal } from './components/InsightsJournal';
+ import { ResourceLibrary } from './components/ResourceLibrary';
++import { ActivityFeed } from './components/ActivityFeed';
+ import { LoginScreen } from './components/LoginScreen';
+ import { ForcePasswordReset } from './components/ForcePasswordReset';
+ import {
+@@ -17,11 +18,14 @@ import {
+   listAdminCoachees,
+   listCoachDirectory,
+   listInsights,
++  listNotifications,
+   listPlans,
++  markAllNotificationsRead,
++  markNotificationRead,
+   updateInsight,
+ } from './api';
+ import { SESSION_EXPIRED_MESSAGE } from './constants/messages';
+-import type { AdminCoachee, AdminCoach, CoachingPlan, CurrentUser, InsightItem } from './types';
++import type { AdminCoachee, AdminCoach, CoachingPlan, CurrentUser, InsightItem, NotificationItem } from './types';
+ 
+ const CALENDAR_FEATURE_ENABLED = import.meta.env.VITE_ENABLE_CALENDAR !== 'false';
+@@ -30,6 +34,7 @@ const MODULES = [
+   { key: 'insights', label: 'Insights', enabled: true },
+   { key: 'calendar', label: 'Calendar', enabled: CALENDAR_FEATURE_ENABLED },
+   { key: 'resources', label: 'Resources', enabled: true },
++  { key: 'activity', label: 'Activity', enabled: true },
+   { key: 'administration', label: 'Administration', enabled: true },
+ ] as const;
+@@ -41,6 +46,7 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
+     insights: 'Capture and revisit private reflections and progress notes for each coachee.',
+     calendar: 'Schedule sessions and manage your availability with coachees.',
+     resources: 'Upload and share documents, linking them to the coaching plans they support.',
++    activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
+     administration: 'Manage coaches, coachees, and their account access.',
+   },
+   admin: {
+@@ -48,6 +54,7 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
+     insights: 'Review reflections and progress notes captured across the platform.',
+     calendar: 'Oversee sessions and availability across coaches and coachees.',
+     resources: 'Oversee documents shared across coaching plans on the platform.',
++    activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
+     administration: 'Manage coaches, coachees, and their account access.',
+   },
+   coachee: {
+@@ -55,6 +62,7 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
+     insights: 'Capture and revisit your private reflections and progress notes.',
+     calendar: 'View upcoming sessions and request time with your coach.',
+     resources: 'Upload and share documents with your coach to support your plans.',
++    activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
+     administration: 'Manage your account access.',
+   },
+ };
+@@ -88,6 +96,14 @@ export default function App() {
+   const [insightsError, setInsightsError] = useState<string | null>(null);
+   const [selectedInsightCoachee, setSelectedInsightCoachee] = useState<string | null>(null);
+ 
++  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
++  const [notificationsLoading, setNotificationsLoading] = useState(false);
++  const [notificationsError, setNotificationsError] = useState<string | null>(null);
++  const [focusActionId, setFocusActionId] = useState<string | null>(null);
++  const [focusResourceId, setFocusResourceId] = useState<string | null>(null);
++
++  const unreadCount = useMemo(() => notifications.filter((item) => !item.isRead).length, [notifications]);
++
+   useEffect(() => {
+     let cancelled = false;
+     if (!getToken()) {
+@@ -203,6 +219,98 @@ export default function App() {
+     };
+   }, [currentUser]);
+ 
++  const refreshNotifications = useCallback(async (): Promise<void> => {
++    try {
++      const items = await listNotifications();
++      setNotifications(items);
++      setNotificationsError(null);
++    } catch {
++      setNotificationsError('Could not load activity.');
++    }
++  }, []);
++
++  useEffect(() => {
++    if (!currentUser) return;
++    let cancelled = false;
++    setNotificationsLoading(true);
++    listNotifications()
++      .then((items) => {
++        if (!cancelled) {
++          setNotifications(items);
++          setNotificationsError(null);
 +        }
++      })
++      .catch(() => {
++        if (!cancelled) setNotificationsError('Could not load activity.');
++      })
++      .finally(() => {
++        if (!cancelled) setNotificationsLoading(false);
++      });
 +
-+        rendered: list[str] = []
-+        used_prompt_placeholder = False
-+        for token in tokens:
-+            new_token = token
-+            for placeholder, value in substitutions.items():
-+                if placeholder in new_token:
-+                    new_token = new_token.replace(placeholder, value)
-+                    if placeholder in ("{prompt_file}", "{prompt}"):
-+                        used_prompt_placeholder = True
-+            rendered.append(new_token)
++    const interval = setInterval(() => {
++      listNotifications()
++        .then((items) => {
++          if (!cancelled) setNotifications(items);
++        })
++        .catch(() => {
++          /* silent poll failure */
++        });
++    }, 20000);
 +
-+        if not used_prompt_placeholder:
-+            rendered.append(str(prompt_file))
-+        return rendered
++    return () => {
++      cancelled = true;
++      clearInterval(interval);
++    };
++  }, [currentUser]);
 +
-+    # -- execution ----------------------------------------------------------
++  async function handleOpenNotification(notification: NotificationItem): Promise<void> {
++    if (!notification.isRead) {
++      setNotifications((prev) =>
++        prev.map((item) => (item.id === notification.id ? { ...item, isRead: true } : item)),
++      );
++      try {
++        await markNotificationRead(notification.id);
++      } catch {
++        /* keep optimistic state; will resync on next poll */
++      }
++    }
 +
-+    def run(
-+        self,
-+        task: str,
-+        cwd: str | Path = ".",
-+        requirements_text: str | None = None,
-+        context_files: Sequence[str] | None = None,
-+        execute: bool = False,
-+        timeout: int = DEFAULT_TIMEOUT_SECONDS,
-+        write_report: bool = True,
-+    ) -> AgenticRunResult:
-+        warnings: list[str] = []
++    if ((notification.targetType === 'plan' || notification.targetType === 'action') && notification.planId) {
++      const plan = plans.find((item) => item.id === notification.planId);
++      if (plan) {
++        setFocusActionId(
++          notification.targetType === 'action' ? notification.actionId ?? notification.targetId : null,
++        );
++        setSelectedPlan(plan);
++        setActiveModule('plans');
++        return;
++      }
++    }
++    if (notification.targetType === 'session') {
++      setActiveModule('calendar');
++      return;
++    }
++    if (notification.targetType === 'resource') {
++      setFocusResourceId(notification.targetId ?? null);
++      setActiveModule('resources');
++      return;
++    }
++    if (notification.targetType === 'insight') {
++      setActiveModule('insights');
++      return;
++    }
++    setActiveModule('activity');
++  }
 +
-+        cwd_path = Path(cwd).resolve()
-+        if not cwd_path.exists() or not cwd_path.is_dir():
-+            raise AgenticDeveloperAgentError(f"working directory does not exist: {cwd_path}")
++  async function handleMarkAllNotificationsRead(): Promise<void> {
++    setNotifications((prev) => prev.map((item) => ({ ...item, isRead: true })));
++    try {
++      await markAllNotificationsRead();
++    } catch {
++      void refreshNotifications();
++    }
++  }
 +
-+        repo_root = Path(__file__).resolve().parent.parent
-+        try:
-+            cwd_path.relative_to(repo_root)
-+        except ValueError:
-+            warnings.append(f"working directory {cwd_path} is outside the repo root {repo_root}")
-+
-+        prompt = self.build_prompt(task, requirements_text, context_files)
-+
-+        # Persist the prompt to a temp file the wrapped CLI can read.
-+        fd, tmp_name = tempfile.mkstemp(prefix="agentic-prompt-", suffix=".md", text=True)
+   async function handleCreatePlan(planData: Omit<CoachingPlan, 'id' | 'createdAt' | 'coacheeName'>): Promise<void> {
+     try {
+       const created = await createPlan(planData);
+@@ -311,10 +419,31 @@ export default function App() {
+           <button
+             key={module.key}
+             className={module.key === activeModule ? 'tab active' : 'tab'}
+-            onClick={() => setActiveModule(module.key)}
++            onClick={() => {
++              setActiveModule(module.key);
++              if (module.key === 'activity') {
++                void refreshNotifications();
++              }
++            }}
+             type='button'
+           >
+             {module.label}
++            {module.key === 'activity' && unreadCount > 0 && (
++              <span
++                aria-label={`${unreadCount} unread`}
++                style={{
++                  marginLeft: 6,
++                  background: '#e5484d',
++                  color: '#fff',
++                  borderRadius: 999,
++                  padding: '0 6px',
++                  fontSize: '0.72rem',
++                  fontWeight: 700,
++                }}
++              >
+
 ```
 
-### `docs/coaching-plan-kanban-requirements.md` (modified)
+### `generated/frontend-app/src/api.ts` (modified)
 
 ```diff
-@@ -1,34 +1,40 @@
- # Coaching Plan and Kanban Requirements
+@@ -10,6 +10,7 @@ import type {
+   CurrentUser,
+   DiscussionItem,
+   InsightItem,
++  NotificationItem,
+   PlanAction,
+   PlanStatus,
+   PlanTask,
+@@ -341,8 +342,10 @@ export async function listDiscussions(filters?: { planId?: string; taskId?: stri
+   return messages.map(toDiscussionItem);
+ }
  
-+> Aligned with the current codebase (`api.models.CoachingPlan`, `api.models.Task`,
-+> `api.models.Message`). Plan status values are `todo` / `in_progress` / `done`;
-+> action (task) status values are `backlog` / `in_progress` / `done`.
+-export async function createDiscussion(payload: { planId: string; taskId?: string; author: string; message: string }): Promise<DiscussionItem> {
+-  const mentions = Array.from(new Set((payload.message.match(/@\w+/g) ?? []).map((token) => token.slice(1))));
++export async function createDiscussion(payload: { planId: string; taskId?: string; author: string; message: string; mentions?: string[] }): Promise<DiscussionItem> {
++  const mentions = payload.mentions && payload.mentions.length
++    ? payload.mentions
++    : Array.from(new Set((payload.message.match(/@\w+/g) ?? []).map((token) => token.slice(1))));
+   const created = await request<ApiMessage>('/api/messages/', {
+     method: 'POST',
+     body: JSON.stringify({
+@@ -417,6 +420,58 @@ export async function deleteInsight(insightId: string): Promise<void> {
+   await request<void>(`/api/insights/${insightId}/`, { method: 'DELETE' });
+ }
+ 
++// ---------------------------------------------------------------------------
++// Activity notifications
++// ---------------------------------------------------------------------------
 +
- ## Summary
--- Coaches can create one to many coaching plans for a coachee.
--- Coaches can show coaching plans as a list in target date order.
--- Coaches can allow each coaching plan to have a title, a description, a status (to do, in progress, done) and one to many actions as well as be assigned to a coachee which would be a list of coachees that I've added to the system.
-+- Coaches can create one or more coaching plans for a coachee.
-+- Coaching plans are listed in target-date order.
-+- Each plan has a title, description, overall goal, status (to do / in progress / done), target date, and one or more sequenced actions, and is assigned to a coachee the coach (or an administrator) has added to the system.
- 
- ## User stories
--- As a coach, I want to create one to many coaching plans for a coachee.
--- As a coach, I want coaching plans to be shown as a list in target date order.
--- As a coach, I want each coaching plan to have a title, a description, a status (to do, in progress, done) and one to many actions as well as be assigned to a coachee which would be a list of coachees that I've added to the system.
--- As a coach, I want each action to have a title, description, state (to do, in progress, done) as well as discussion where the coachee can @ a coach (also a list of people an administrator has added to the system), so that coach and coachee stay aligned on next steps.
--- As a coach, I want coaching plans to include discussion threads.
--- As a coach, I want to manage a coaching plan with an overall goal, sequenced actions, a kanban-style board, and a target date, so that progress remains visible over time.
-+- As a coach, I want to create one or more coaching plans for a coachee.
-+- As a coach, I want coaching plans shown as a list in target-date order.
-+- As a coach, I want each coaching plan to have a title, description, overall goal, status (to do / in progress / done), target date, and one or more actions, assigned to a coachee that I or an administrator have added to the system.
-+- As a coach, I want each action to have a title, description, kanban status (backlog / in progress / done), assignee, and sequence order, plus discussion where participants can @mention a coach (a person an administrator has added), so that everyone stays aligned on next steps.
-+- As a coach, I want coaching plans and actions to include discussion threads with @mentions.
-+- As a coach, I want to attach resources/documents to a coaching plan, so that plan-specific materials stay together.
- 
- ## Functional requirements
--- The system shall allow coaches to create one to many coaching plans for a coachee.
--- The system shall show coaching plans as a list in target date order.
--- The system shall allow each coaching plan to have a title, a description, a status (to do, in progress, done) and one to many actions as well as be assigned to a coachee which would be a list of coachees that I've added to the system.
--- The system shall allow each action to have a title, description, state (to do, in progress, done) as well as discussion where the coachee can @ a coach (also a list of people an administrator has added to the system) so that coach and coachee stay aligned on next steps.
--- The system shall allow coaching plans to include discussion threads.
--- The system shall allow coaches to manage a coaching plan with an overall goal, sequenced actions, a kanban-style board, and a target date so that progress remains visible over time.
-+- The system shall allow coaches to create one or more coaching plans for a coachee.
-+- The system shall return coaching plans ordered by target date.
-+- The system shall allow each coaching plan to have a title, description, overall goal, status (to do / in progress / done), and target date, assigned to a coachee.
-+- The system shall allow each plan to contain sequenced actions (`/api/plans/<id>/actions`), each with a title, description, kanban status (backlog / in progress / done), assignee, order, and due date.
-+- The system shall support discussion messages on plans and actions, with comma-separated @mentions stored against each message.
-+- The system shall allow resources/documents to be optionally linked to a coaching plan.
- 
- ## Non-functional requirements
--- None identified
-+- Plan and action endpoints shall require JWT authentication and be scoped to the owning coach.
- 
- ## Constraints and assumptions
--- None identified
-+- Backend: Django REST Framework; plans, actions (tasks), and messages are persisted in SQLite (development).
-+- Coachees must be created by a coach or administrator before a plan can be assigned to them.
- 
--## Open questions
--- None identified
-+## Open questions / not yet implemented
-+- Real-time notifications for @mentions are not yet implemented; mentions are stored and displayed only.
- 
- ## Sources
--- file: generated\coaching-plan-input.txt
-+- Codebase: `api.models.CoachingPlan`, `api.models.Task`, `api.models.Message`
-+- Original intake: `generated/coaching-plan-input.txt`
++interface ApiNotification {
++  id: number;
++  actor_name: string;
++  notification_type: NotificationItem['type'];
++  message: string;
++  target_type: string;
++  target_id: number | null;
++  plan_id: number | null;
++  action_id: number | null;
++  is_read: boolean;
++  created_at: string;
++}
++
++function toNotificationItem(n: ApiNotification): NotificationItem {
++  const targetType = (['plan', 'action', 'session', 'insight', 'resource'].includes(n.target_type)
++    ? n.target_type
++    : '') as NotificationItem['targetType'];
++  return {
++    id: String(n.id),
++    actorName: n.actor_name,
++    type: n.notification_type,
++    message: n.message,
++    targetType,
++    targetId: n.target_id != null ? String(n.target_id) : null,
++    planId: n.plan_id != null ? String(n.plan_id) : null,
++    actionId: n.action_id != null ? String(n.action_id) : null,
++    isRead: Boolean(n.is_read),
++    createdAt: n.created_at,
++  };
++}
++
++export async function listNotifications(): Promise<NotificationItem[]> {
++  const items = await request<ApiNotification[] | ApiListResponse<ApiNotification>>('/api/notifications/');
++  return toListResults(items).map(toNotificationItem);
++}
++
++export async function markNotificationRead(notificationId: string): Promise<NotificationItem> {
++  const updated = await request<ApiNotification>(`/api/notifications/${notificationId}/`, {
++    method: 'PATCH',
++    body: JSON.stringify({ is_read: true }),
++  });
++  return toNotificationItem(updated);
++}
++
++export async function markAllNotificationsRead(): Promise<void> {
++  await request<{ updated: number }>('/api/notifications/mark-all-read/', { method: 'POST' });
++}
++
+ // ---------------------------------------------------------------------------
+ // Coachees
+ // ---------------------------------------------------------------------------
+@@ -944,6 +999,7 @@ interface ApiResource {
+   scope: string;
+   plan: number | null;
+   plan_title: string | null;
++  shared_with?: string[];
+   file_url: string | null;
+   file_name: string | null;
+   owner_username: string;
+@@ -959,6 +1015,7 @@ function toResourceItem(r: ApiResource): ResourceItem {
+     scope: r.scope ?? '',
+     planId: r.plan ? String(r.plan) : null,
+     planTitle: r.plan_title ?? null,
++    sharedWith: r.shared_with ?? [],
+     fileUrl: r.file_url ?? null,
+     fileName: r.file_name ?? null,
+     ownerUsername: r.owner_username ?? '',
+@@ -976,12 +1033,14 @@ export async function createResource(payload: {
+   title: string;
+   description?: string;
+   planId?: string | null;
++  sharedWith?: string[];
+   file: File;
+ }): Promise<ResourceItem> {
+   const form = new FormData();
+   form.append('title', payload.title);
+   form.append('description', payload.description ?? '');
+   if (payload.planId) form.append('plan', payload.planId);
++  (payload.sharedWith ?? []).forEach((username) => form.append('shared_with', username));
+   form.append('file', payload.file);
+   const created = await request<ApiResource>('/api/resources/', { method: 'POST', body: form });
+   return toResourceItem(created);
 ```
 
-### `docs/coaching-platform-requirements.md` (modified)
+### `generated/frontend-app/src/components/ActivityFeed.tsx` (new file)
 
 ```diff
-@@ -1,44 +1,90 @@
- # Coaching Platform Requirements
- 
-+> This document describes the requirements **as implemented in the current codebase**
-+> (`generated/backend-app` Django + DRF API and `generated/frontend-app` React + Vite client).
-+> It is kept in sync with the code so re-running the developer agent should not contradict reality.
+@@ -0,0 +1,103 @@
++import type { NotificationItem } from '../types';
 +
- ## Summary
--- Coachees can request coaching sessions with a coach and sync them with Microsoft Outlook and Google Calendar so that session bookings stay aligned with preferred calendar tools.
--- Coachees can manage a coaching plan with an overall goal, sequenced actions, a kanban-style board, and a target date so that progress remains visible over time.
--- Coachees can add discussion to coaching tasks and mention a coach with @mentions so that coach and coachee stay aligned on next steps.
-+- The platform supports three roles — administrator, coach, and coachee — secured with JWT authentication.
-+- Administrators onboard coaches and coachees; new accounts receive a welcome email with a temporary password and must set a new password on first sign-in.
-+- Coaches manage coachees, build coaching plans with sequenced kanban actions, hold discussions with @mentions, record insights, manage availability and sessions, and share resources/documents.
- 
- ## User stories
--- As a coachee, I want to request coaching sessions with a coach and sync them with Microsoft Outlook and Google Calendar, so that session bookings stay aligned with preferred calendar tools.
--- As a coachee, I want to manage a coaching plan with an overall goal, sequenced actions, a kanban-style board, and a target date, so that progress remains visible over time.
--- As a coachee, I want to add discussion to coaching tasks and mention a coach with @mentions, so that coach and coachee stay aligned on next steps.
--- As a coachee, I want coaches to add insights to their coachee profiles, so that progress can be reviewed over time.
--- As a coachee, I want to access a central hub for coach-shared information, including plan-specific resources, so that important information stays easy to find.
--- As a coachee, I want to journal and capture plan notes in a chronological timeline, so that progress can be reflected on over time.
--- As a coach, I want to search and filter coachee profiles with contact details and profile photos, so that coach workloads remain easy to manage.
++interface ActivityFeedProps {
++  notifications: NotificationItem[];
++  loading: boolean;
++  error: string | null;
++  onOpen: (notification: NotificationItem) => void;
++  onMarkAllRead: () => void;
++}
 +
-+### Authentication, roles, and onboarding
-+- As an administrator, I want to create and manage coach accounts, so that coaches can access the platform.
-+- As an administrator, I want to create and manage coachee accounts, so that coachees can be onboarded centrally.
-+- As a coach, I want to add my own coachees, so that I can manage the people I work with.
-+- As a new user, I want to receive a welcome email with a temporary password when my account is created, so that I can sign in for the first time.
-+- As a new user, I want to be required to set a strong password on first sign-in, so that my account is secured before I use it.
-+- As a user, I want to change my password, so that I keep my account secure.
++const TYPE_LABEL: Record<NotificationItem['type'], string> = {
++  mention: 'Mention',
++  session_booked: 'Session booked',
++  task_assigned: 'Action assigned',
++  action_created: 'Action assigned',
++  resource_added: 'Resource shared',
++};
 +
-+### Coaching plans and tasks
- - As a coach, I want to manage a coaching plan with an overall goal, sequenced actions, a kanban-style board, and a target date, so that progress remains visible over time.
--- As a coach, I want to support task discussions and notifications for @mentions, so that collaboration stays timely and visible.
--- As a coach, I want to manage coach availability for session requests, so that coachees can book within approved time slots.
--- As a coach, I want to share coaching resources and one-to-one documents with coachees, so that shared materials remain easy to find.
-+- As a coach, I want each plan action to have a title, description, kanban status, assignee, and sequence order, so that work is clear and ordered.
-+- As a coach or coachee, I want to add discussion to coaching tasks and plans and mention people with @mentions, so that everyone stays aligned on next steps.
++function formatTimestamp(iso: string): string {
++  const date = new Date(iso);
++  if (Number.isNaN(date.getTime())) return iso;
++  const now = Date.now();
++  const diffMs = now - date.getTime();
++  const diffMin = Math.round(diffMs / 60000);
++  if (diffMin < 1) return 'just now';
++  if (diffMin < 60) return `${diffMin} min ago`;
++  const diffHours = Math.round(diffMin / 60);
++  if (diffHours < 24) return `${diffHours} hr ago`;
++  const diffDays = Math.round(diffHours / 24);
++  if (diffDays < 7) return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
++  return date.toLocaleString();
++}
 +
-+### Coachees and insights
-+- As a coach, I want to search and filter coachee profiles with contact details and notes, so that coach workloads remain easy to manage.
-+- As a coach, I want to add insights to coachee profiles, so that progress can be reviewed over time.
++export function ActivityFeed({ notifications, loading, error, onOpen, onMarkAllRead }: ActivityFeedProps) {
++  const hasUnread = notifications.some((item) => !item.isRead);
 +
-+### Sessions and availability
-+- As a coach, I want to manage weekly availability windows and unavailable periods, so that sessions are booked within approved time slots.
-+- As a coachee, I want to request and view coaching sessions (video, in-person, or phone) with my coaches, so that bookings stay organised.
++  return (
++    <div>
++      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
++        <div>
++          <h2>Activity</h2>
++          <p className='muted'>Mentions, session bookings, and actions assigned to you — newest first.</p>
++        </div>
++        <button type='button' className='tab' onClick={onMarkAllRead} disabled={!hasUnread}>
++          Mark all as read
++        </button>
++      </div>
 +
-+### Resources and documents
-+- As a coach, I want to share coaching resources and one-to-one documents (optionally linked to a specific plan), so that shared materials remain easy to find.
- 
- ## Functional requirements
--- The system shall allow coachees to request coaching sessions with a coach and sync them with Microsoft Outlook and Google Calendar so that session bookings stay aligned with preferred calendar tools.
--- The system shall allow coachees to manage a coaching plan with an overall goal, sequenced actions, a kanban-style board, and a target date so that progress remains visible over time.
--- The system shall allow coachees to add discussion to coaching tasks and mention a coach with @mentions so that coach and coachee stay aligned on next steps.
--- The system shall allow coaches to add insights to their coachee profiles so that progress can be reviewed over time.
--- The system shall allow coachees to access a central hub for coach-shared information, including plan-specific resources so that important information stays easy to find.
--- The system shall allow coachees to journal and capture plan notes in a chronological timeline so that progress can be reflected on over time.
--- The system shall allow coaches to search and filter coachee profiles with contact details and profile photos so that coach workloads remain easy to manage.
--- The system shall allow coaches to manage a coaching plan with an overall goal, sequenced actions, a kanban-style board, and a target date so that progress remains visible over time.
--- The system shall allow coaches to support task discussions and notifications for @mentions so that collaboration stays timely and visible.
--- The system shall allow coaches to manage coach availability for session requests so that coachees can book within approved time slots.
--- The system shall allow coaches to share coaching resources and one-to-one documents with coachees so that shared materials remain easy to find.
++      {loading && <p className='muted'>Loading activity…</p>}
++      {error && <p className='muted' role='alert'>{error}</p>}
 +
-+### Authentication and authorisation
-+- The system shall authenticate users with JWT access/refresh tokens (`/api/auth/login`, `/api/auth/refresh`) and expose the current user via `/api/auth/me`.
-+- The system shall support user registration via `/api/auth/register`.
-+- The system shall distinguish administrator (staff), coach, and coachee roles and enforce role-based access on protected endpoints.
++      {!loading && !error && notifications.length === 0 && (
++        <div className='card'>
++          <p className='muted'>No notifications yet. You're all caught up.</p>
++        </div>
++      )}
 +
-+### Administration and onboarding
-+- The system shall allow administrators to create, list, update, and delete coach accounts (`/api/admin/coaches`).
-+- The system shall allow administrators to create, list, update, and delete coachee accounts (`/api/admin/coachees`) and browse a coach directory.
-+- The system shall send a welcome email containing a temporary password when a coach or coachee account is provisioned.
-+- The system shall flag accounts created with a temporary password (`must_reset_password`) and require a password change on first sign-in.
-+- The system shall allow users to change their password via `/api/auth/change-password`, clearing the forced-reset flag on success.
-+
-+### Coaching plans and tasks
-+- The system shall allow coaches to create one or more coaching plans, each with a title, description, overall goal, status (to do / in progress / done), and target date, assigned to a coachee.
-+- The system shall return coaching plans ordered by target date.
-+- The system shal
++      {notifications.length > 0 && (
++        <ul className='list' style={{ listStyle: 'none', padding: 0 }}>
++          {notifications.map((item) => (
++            <li key={item.id} style={{ marginBottom: 8 }}>
++              <button
++                type='button'
++                className='card'
++                onClick={() => onOpen(item)}
++                style={{
++                  display: 'block',
++                  width: '100%',
++                  textAlign: 'left',
++                  cursor: 'pointer',
++                  border: item.isRead ? undefined : '1px solid #4f8cff',
++                  background: item.isRead ? undefined : 'rgba(79, 140, 255, 0.08)',
++                }}
++                aria-label={`${item.isRead ? '' : 'Unread. '}${item.message}`}
++              >
++                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
++                  <span className='muted' style={{ fontSize: '0.8rem' }}>{TYPE_LABEL[item.type]}</span>
++                  <span className='muted' style={{ fontSize: '0.8rem' }}>{formatTimestamp(item.createdAt)}</span>
++                </div>
++                <div style={{ marginTop: 4 }}>
++                  {!item.isRead && (
++                    <span
++                      aria-hidden='true'
++                      style={{
++                        display: 'inline-block',
++                        width: 8,
++                        height: 8,
++                        borderRadius: '50%',
++                        background: '#4f8cff',
++                        marginRight: 8,
++                      }}
++                    />
++                  )}
++                  {item.message}
++                </div>
++              </button>
++            </li>
++          ))}
++        </ul>
++      )}
++    </div>
++  );
++}
 ```
 
-### `tests/test_agentic_developer_agent.py` (new file)
+### `generated/frontend-app/src/components/MentionInput.tsx` (new file)
 
 ```diff
-@@ -0,0 +1,131 @@
-+from __future__ import annotations
+@@ -0,0 +1,153 @@
++import { useRef, useState } from 'react';
 +
-+import subprocess
-+import tempfile
-+import unittest
-+from pathlib import Path
++export interface MentionCandidate {
++  /** Text shown after the `@` in both the menu and the message. */
++  label: string;
++  /** Canonical value sent to the backend (username or coachee name). */
++  value: string;
++}
 +
-+from agents.agentic_developer_agent import (
-+    AgenticDeveloperAgent,
-+    AgenticDeveloperAgentError,
-+    DEFAULT_AGENT_COMMAND,
-+    REPORT_FILENAME,
-+)
++interface MentionInputProps {
++  value: string;
++  onChange: (value: string) => void;
++  candidates: MentionCandidate[];
++  rows?: number;
++  placeholder?: string;
++}
 +
++// Matches an in-progress "@query" at the caret: preceded by start-of-text or
++// whitespace, with no spaces/@ in the query itself.
++const MENTION_QUERY_RE = /(^|\s)@([^\s@]*)$/;
 +
-+class FakeRunner:
-+    """Records the last invocation and returns a configurable result."""
++/** Collect the canonical values of every candidate mentioned in `text`. */
++export function collectMentions(text: string, candidates: MentionCandidate[]): string[] {
++  const seen: string[] = [];
++  for (const candidate of candidates) {
++    if (text.includes(`@${candidate.label}`) && !seen.includes(candidate.value)) {
++      seen.push(candidate.value);
++    }
++  }
++  return seen;
++}
 +
-+    def __init__(self, returncode: int = 0, stdout: str = "ok", stderr: str = "") -> None:
-+        self.returncode = returncode
-+        self.stdout = stdout
-+        self.stderr = stderr
-+        self.calls: list[dict] = []
++export function MentionInput({ value, onChange, candidates, rows = 2, placeholder }: MentionInputProps) {
++  const textareaRef = useRef<HTMLTextAreaElement>(null);
++  const [open, setOpen] = useState(false);
++  const [query, setQuery] = useState('');
++  const [activeIndex, setActiveIndex] = useState(0);
 +
-+    def __call__(self, command, **kwargs):  # noqa: D401 - test stub
-+        self.calls.append({"command": command, "kwargs": kwargs})
-+        return subprocess.CompletedProcess(
-+            args=command, returncode=self.returncode, stdout=self.stdout, stderr=self.stderr
-+        )
++  const suggestions = open
++    ? candidates.filter((candidate) => candidate.label.toLowerCase().includes(query.toLowerCase()))
++    : [];
 +
++  function syncQueryFromCaret(text: string, caret: number): void {
++    const match = text.slice(0, caret).match(MENTION_QUERY_RE);
++    if (match) {
++      setQuery(match[2]);
++      setActiveIndex(0);
++      setOpen(true);
++    } else {
++      setOpen(false);
++    }
++  }
 +
-+class BuildPromptTests(unittest.TestCase):
-+    def setUp(self) -> None:
-+        self.agent = AgenticDeveloperAgent(agent_command=DEFAULT_AGENT_COMMAND)
++  function handleChange(event: React.ChangeEvent<HTMLTextAreaElement>): void {
++    const text = event.target.value;
++    onChange(text);
++    syncQueryFromCaret(text, event.target.selectionStart ?? text.length);
++  }
 +
-+    def test_prompt_includes_task(self) -> None:
-+        prompt = self.agent.build_prompt("Add a logout button")
-+        self.assertIn("Add a logout button", prompt)
-+        self.assertIn("# Coding task", prompt)
++  function applyMention(candidate: MentionCandidate): void {
++    const el = textareaRef.current;
++    const caret = el?.selectionStart ?? value.length;
++    const upto = value.slice(0, caret);
++    const after = value.slice(caret);
++    const newUpto = upto.replace(MENTION_QUERY_RE, (_full, prefix: string) => `${prefix}@${candidate.label} `);
++    onChange(newUpto + after);
++    setOpen(false);
++    requestAnimationFrame(() => {
++      el?.focus();
++      el?.setSelectionRange(newUpto.length, newUpto.length);
++    });
++  }
 +
-+    def test_prompt_includes_requirements_and_context(self) -> None:
-+        prompt = self.agent.build_prompt(
-+            "Do the thing",
-+            requirements_text="The system shall do the thing.",
-+            context_files=["src/app.tsx"],
-+        )
-+        self.assertIn("The system shall do the thing.", prompt)
-+        self.assertIn("src/app.tsx", prompt)
++  function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>): void {
++    if (!open || suggestions.length === 0) return;
++    if (event.key === 'ArrowDown') {
++      event.preventDefault();
++      setActiveIndex((index) => (index + 1) % suggestions.length);
++    } else if (event.key === 'ArrowUp') {
++      event.preventDefault();
++      setActiveIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
++    } else if (event.key === 'Enter' || event.key === 'Tab') {
++      event.preventDefault();
++      applyMention(suggestions[Math.min(activeIndex, suggestions.length - 1)]);
++    } else if (event.key === 'Escape') {
++      setOpen(false);
++    }
++  }
 +
-+    def test_empty_task_rejected(self) -> None:
-+        with self.assertRaises(AgenticDeveloperAgentError):
-+            self.agent.build_prompt("   ")
++  return (
++    <div style={{ position: 'relative' }}>
++      <textarea
++        ref={textareaRef}
++        rows={rows}
++        value={value}
++        placeholder={placeholder}
++        onChange={handleChange}
++        onKeyDown={handleKeyDown}
++        onKeyUp={(event) => syncQueryFromCaret(event.currentTarget.value, event.currentTarget.selectionStart ?? 0)}
++        onClick={(event) => syncQueryFromCaret(event.currentTarget.value, event.currentTarget.selectionStart ?? 0)}
++        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
++      />
++      {open && suggestions.length > 0 && (
++        <ul
++          role='listbox'
++          style={{
++            position: 'absolute',
++            top: '100%',
++            left: 0,
++            right: 0,
++            margin: 0,
++            padding: 4,
++            listStyle: 'none',
++            background: '#fff',
++            border: '1px solid #cbd5e1',
++            borderRadius: 8,
++            boxShadow: '0 8px 24px rgba(15,23,42,0.18)',
++            zIndex: 80,
++            maxHeight: 200,
++            overflowY: 'auto',
++          }}
++        >
++          {suggestions.map((candidate, index) => (
++            <li key={candidate.value}>
++              <button
++                type='button'
++                role='option'
++                aria-selected={index === activeIndex}
++                // onMouseDown (not onClick) so selection happens before the textarea blur closes the menu.
++                onMouseDown={(event) => {
++                  event.preventDefault();
++                  applyMention(candidate);
++                }}
++                style={{
++                  display: 'block',
++                  width: '100%',
++                  textAlign: 'left',
++                  padding: '6px 8px',
++                  border: 'none',
++                  borderRadius: 6,
++                  cursor: 'pointer',
++                  background: index === activeIndex ? 'rgba(11,118,110,0.12)' : 'transparent',
++                }}
++              >
++                @{candidate.label}
++              </button>
++            </li>
++          ))}
++        </ul>
++      )}
++    </div>
++  );
++}
+```
+
+### `generated/frontend-app/src/components/PlanDetail.tsx` (modified)
+
+```diff
+@@ -1,6 +1,7 @@
+ import { useEffect, useMemo, useState } from 'react';
+ import { createAction, createDiscussion, getCurrentUsername, getPlan, listActions, listDiscussions, listResources, listSessionsForPlan, updateAction, updateActionStatus, updatePlan, updateSession } from '../api';
+ import type { AdminCoach, AdminCoachee, CalendarSession, CoachingPlan, CurrentUser, DiscussionItem, PlanAction, ResourceItem, TaskStatus } from '../types';
++import { MentionInput, collectMentions, type MentionCandidate } from './MentionInput';
+ import { toLocalDateTimeInputValue } from './calendar/calendarUtils';
+ 
+ interface PlanDetailProps {
+@@ -10,6 +11,8 @@ interface PlanDetailProps {
+   currentUser: CurrentUser;
+   onBack: () => void;
+   onPlanUpdated: (plan: CoachingPlan) => void;
++  focusActionId?: string | null;
++  onFocusHandled?: () => void;
+ }
+ 
+ const STATUS_LABEL: Record<TaskStatus, string> = {
+@@ -20,7 +23,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
+ 
+ const STATUS_OPTIONS: TaskStatus[] = ['backlog', 'inProgress', 'done'];
+ 
+-export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPlanUpdated }: PlanDetailProps) {
++export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPlanUpdated, focusActionId, onFocusHandled }: PlanDetailProps) {
+   const [actions, setActions] = useState<PlanAction[]>([]);
+   const [discussions, setDiscussions] = useState<DiscussionItem[]>([]);
+   const [loading, setLoading] = useState(true);
+@@ -85,6 +88,14 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
+     }
+   }, [assignee, assigneeOptions]);
+ 
++  // People who can be @mentioned in this plan's discussions (the coach and the coachee).
++  const mentionCandidates = useMemo<MentionCandidate[]>(() => {
++    const list: MentionCandidate[] = [];
++    if (plan.coachUsername) list.push({ label: plan.coachUsername, value: plan.coachUsername });
++    if (coacheeName) list.push({ label: coacheeName, value: coacheeName });
++    return list;
++  }, [plan.coachUsername, coacheeName]);
 +
+   useEffect(() => {
+     let cancelled = false;
+     setLoading(true);
+@@ -109,6 +120,16 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
+     return () => clearInterval(interval);
+   }, [plan.id]);
+ 
++  // Deep-link: when arriving from a notification, open the referenced action.
++  useEffect(() => {
++    if (!focusActionId) return;
++    const target = actions.find((action) => action.id === focusActionId);
++    if (target) {
++      setActiveAction(target);
++      onFocusHandled?.();
++    }
++  }, [focusActionId, actions, onFocusHandled]);
 +
-+class BuildCommandTests(unittest.TestCase):
-+    def test_prompt_file_placeholder_substituted(self) -> None:
-+        agent = AgenticDeveloperAgent(agent_command="aider --yes --message-file {prompt_file}")
-+        pf = Path("/tmp/p.md")
-+        cmd = agent.build_command(pf, Path("/work"), "prompt")
-+        self.assertEqual(cmd, ["aider", "--yes", "--message-file", str(pf)])
+   useEffect(() => {
+     let cancelled = false;
+     setDiscussionsLoading(true);
+@@ -271,15 +292,17 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
+   async function handleSaveAction(): Promise<void> {
+     if (!activeAction) return;
+     try {
+-      const updated = await updateAction(plan.id, activeAction.id, {
+-        title: activeAction.title,
+-        description: activeAction.description,
+-        assignee: activeAction.assignee,
+-        dueDate: activeAction.dueDate,
+-        status: activeAction.status,
+-      });
++      const updated = currentUser.role === 'coachee'
++        ? await updateActionStatus(plan.id, activeAction.id, activeAction.status)
++        : await updateAction(plan.id, activeAction.id, {
++            title: activeAction.title,
++            description: activeAction.description,
++            assignee: activeAction.assignee,
++            dueDate: activeAction.dueDate,
++            status: activeAction.status,
++          });
+       setActions((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+-      setActiveAction(updated);
++      setActiveAction(null);
+       setError(null);
+     } catch {
+       setError('Could not update action.');
+@@ -295,6 +318,7 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
+         planId: plan.id,
+         author: currentUsername,
+         message: text,
++        mentions: collectMentions(text, mentionCandidates),
+       });
+       setDiscussions((prev) => [created, ...prev]);
+       setPlanDiscussionText('');
+@@ -315,6 +339,7 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
+         taskId: activeAction.id,
+         author: currentUsername,
+         message: text,
++        mentions: collectMentions(text, mentionCandidates),
+       });
+       setDiscussions((prev) => [created, ...prev]);
+       setActionDiscussionText('');
+@@ -552,7 +577,13 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
+           <p className='muted' style={{ margin: '0 0 8px 0' }}>Posting as {currentUsername}</p>
+           <label>
+             Message
+-            <textarea rows={2} value={planDiscussionText} onChange={(event) => setPlanDiscussionText(event.target.value)} />
++            <MentionInput
++              value={planDiscussionText}
++              onChange={setPlanDiscussionText}
++              candidates={mentionCandidates}
++              rows={2}
++              placeholder='Type @ to mention the coach or coachee'
++            />
+           </label>
+           <button type='submit' className='primary'>Post plan discussion</button>
+         </form>
+@@ -730,7 +761,13 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
+                 <p className='muted' style={{ margin: '0 0 8px 0' }}>Posting as {currentUsername}</p>
+                 <label>
+                   Message
+-                  <textarea rows={2} value={actionDiscussionText} onChange={(event) => setActionDiscussionText(event.target.value)} />
++                  <MentionInput
++                    value={actionDiscussionText}
++                    onChange={setActionDiscussionText}
++                    candidates={mentionCandidates}
++                    rows={2}
++                    placeholder='Type @ to mention the coach or coachee'
++                  />
+                 </label>
+                 <button type='submit' className='primary'>Post action discussion</button>
+               </form>
+@@ -747,7 +784,7 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
+             </div>
+ 
+             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+-              <button type='button' className='primary' onClick={() => void handleSaveAction()}>Save action</button>
++              <button type='button' className='primary' onClick={() => void handleSaveAction()}>Save and close</button>
+             </div>
+           </div>
+         </div>
+```
+
+### `generated/frontend-app/src/components/ResourceLibrary.tsx` (modified)
+
+```diff
+@@ -1,25 +1,37 @@
+ import { useEffect, useMemo, useRef, useState } from 'react';
+-import { createResource, deleteResource, listResources } from '../api';
++import { createResource, deleteResource, listAdminCoachees, listCoachDirectory, listMyCalendarCoaches, listResources } from '../api';
+ import type { CoachingPlan, CurrentUser, ResourceItem } from '../types';
+ 
+ interface ResourceLibraryProps {
+   plans: CoachingPlan[];
+   currentUser: CurrentUser;
++  focusResourceId?: string | null;
++  onFocusHandled?: () => void;
+ }
+ 
+-export function ResourceLibrary({ plans, currentUser }: ResourceLibraryProps) {
++interface ShareOption {
++  username: string;
++  label: string;
++}
 +
-+    def test_cwd_placeholder_substituted(self) -> None:
-+        agent = AgenticDeveloperAgent(agent_command="tool --cwd {cwd} --file {prompt_file}")
-+        pf = Path("/tmp/p.md")
-+        work = Path("/work")
-+        cmd = agent.build_command(pf, work, "prompt")
-+        self.assertEqual(cmd, ["tool", "--cwd", str(work), "--file", str(pf)])
++export function ResourceLibrary({ plans, currentUser, focusResourceId, onFocusHandled }: ResourceLibraryProps) {
+   const [resources, setResources] = useState<ResourceItem[]>([]);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState<string | null>(null);
+ 
+   const [query, setQuery] = useState('');
++  const [modalOpen, setModalOpen] = useState(false);
+   const [title, setTitle] = useState('');
+   const [description, setDescription] = useState('');
+   const [planId, setPlanId] = useState('');
++  const [shareOptions, setShareOptions] = useState<ShareOption[]>([]);
++  const [selectedShare, setSelectedShare] = useState<string[]>([]);
+   const [file, setFile] = useState<File | null>(null);
+   const [uploading, setUploading] = useState(false);
+   const [formError, setFormError] = useState<string | null>(null);
++  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+   const fileInputRef = useRef<HTMLInputElement>(null);
++  const resourceRefs = useRef<Record<string, HTMLLIElement | null>>({});
+ 
+   useEffect(() => {
+     let cancelled = false;
+@@ -42,6 +54,76 @@ export function ResourceLibrary({ plans, currentUser }: ResourceLibraryProps) {
+     };
+   }, []);
+ 
++  useEffect(() => {
++    let cancelled = false;
++    async function loadShareOptions(): Promise<void> {
++      try {
++        if (currentUser.role === 'coachee') {
++          const coaches = await listMyCalendarCoaches();
++          if (!cancelled) {
++            setShareOptions(coaches.map((c) => ({ username: c.username, label: `${c.username} (coach)` })));
++          }
++          return;
++        }
++        const [coachees, coaches] = await Promise.all([listAdminCoachees(), listCoachDirectory()]);
++        if (cancelled) return;
++        const options: ShareOption[] = [];
++        coachees.forEach((c) => {
++          if (c.userUsername) options.push({ username: c.userUsername, label: `${c.name} (coachee)` });
++        });
++        coaches.forEach((c) => {
++          if (c.username !== currentUser.username) options.push({ username: c.username, label: `${c.username} (coach)` });
++        });
++        setShareOptions(options);
++      } catch {
++        // Non-fatal: sharing options simply won't be offered.
++      }
++    }
++    void loadShareOptions();
++    return () => {
++      cancelled = true;
++    };
++  }, [currentUser.role, currentUser.username]);
 +
-+    def test_prompt_file_appended_when_no_placeholder(self) -> None:
-+        agent = AgenticDeveloperAgent(agent_command="mytool run")
-+        pf = Path("/tmp/p.md")
-+        cmd = agent.build_command(pf, Path("/work"), "prompt")
-+        self.assertEqual(cmd, ["mytool", "run", str(pf)])
++  const handledFocusRef = useRef<string | null>(null);
++  useEffect(() => {
++    if (!focusResourceId) {
++      handledFocusRef.current = null;
++      return;
++    }
++    if (handledFocusRef.current === focusResourceId) return;
++    if (!resources.some((r) => r.id === focusResourceId)) return;
++    handledFocusRef.current = focusResourceId;
++    setQuery('');
++    setHighlightedId(focusResourceId);
++    requestAnimationFrame(() => {
++      resourceRefs.current[focusResourceId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
++    });
++    window.setTimeout(() => setHighlightedId(null), 2500);
++    onFocusHandled?.();
++  }, [focusResourceId, resources, onFocusHandled]);
 +
-+    def test_empty_command_rejected(self) -> None:
-+        with self.assertRaises(AgenticDeveloperAgentError):
-+            AgenticDeveloperAgent(agent_command="   ")
++  function toggleShare(username: string): void {
++    setSelectedShare((prev) =>
++      prev.includes(username) ? prev.filter((u) => u !== username) : [...prev, username],
++    );
++  }
 +
++  function resetForm(): void {
++    setTitle('');
++    setDescription('');
++    setPlanId('');
++    setSelectedShare([]);
++    setFile(null);
++    setFormError(null);
++    if (fileInputRef.current) fileInputRef.current.value = '';
++  }
 +
-+class RunTests(unittest.TestCase):
-+    def test_dry_run_does_not_invoke_runner(self) -> None:
-+        runner = FakeRunner()
-+        agent = AgenticDeveloperAgent(agent_command="aider --message-file {prompt_file}", runner=runner)
-+        with tempfile.TemporaryDirectory() as tmp:
-+            result = agent.run(task="Refactor X", cwd=tmp, execute=False)
-+        self.assertTrue(result.dry_run)
-+        self.assertFalse(result.executed)
-+        self.assertEqual(runner.calls, [])
++  function closeModal(): void {
++    setModalOpen(false);
++    resetForm();
++  }
 +
-+    def test_execute_invokes_runner_and_reports_success(self) -> None:
-+        runner = FakeRunner(returncode=0, stdout="done")
-+        agent = AgenticDeveloperAgent(agent_command="aider --message-file {prompt_file}", runner=runner)
-+        with tempfile.TemporaryDirectory() as tmp:
-+            result = agent.run(task="Refactor X", cwd=tmp, execute=True)
-+        self.assertTrue(result.executed)
-+        self.assertTrue(result.succeeded)
-+        self.assertEqual(len(runner.calls), 1)
-+        self.assertEqual(runner.calls[0]["kwargs"]["cwd"], str(Path(tmp).resolve()))
+   const filtered = useMemo(() => {
+     const lowered = query.trim().toLowerCase();
+     if (!lowered) return resources;
+@@ -70,14 +152,12 @@ export function ResourceLibrary({ plans, currentUser }: ResourceLibraryProps) {
+         title: trimmed,
+         description: description.trim(),
+         planId: planId || null,
++        sharedWith: selectedShare,
+         file,
+       });
+       setResources((prev) => [created, ...prev]);
+-      setTitle('');
+-      setDescription('');
+-      setPlanId('');
+-      setFile(null);
+-      if (fileInputRef.current) fileInputRef.current.value = '';
++      setModalOpen(false);
++      resetForm();
+     } catch (err) {
+       setFormError(err instanceof Error ? err.message : 'Upload failed. Please try again.');
+     } finally {
+@@ -102,46 +182,103 @@ export function ResourceLibrary({ plans, currentUser }: ResourceLibraryProps) {
+         plans get completed.
+       </p>
+ 
+-      <div className='card'>
+-        <h3>Upload a document</h3>
+-        {formError && (
+-          <p className='muted' role='alert' style={{ color: '#b91c1c' }}>
+-            {formError}
+-          </p>
+-        )}
+-        <label>
+-          Title
+-          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder='e.g. Week 1 worksheet' />
+-        </label>
+-        <label>
+-          Description (optional)
+-          <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} />
+-        </label>
+-        <label>
+-          Link to coaching plan (optional)
+-          <select value={planId} onChange={(event) => setPlanId(event.target.value)}>
+-            <option value=''>No plan — shared resource</option>
+-            {plans.map((plan) => (
+-              <option key={plan.id} value={plan.id}>
+-                {plan.title}
+-                {plan.coacheeName ? ` · ${plan.coacheeName}` : ''}
+-              </option>
+-            ))}
+-          </select>
+-        </label>
+-        <label>
+-          Document
+-          <input
+-            ref={fileInputRef}
+-            type='file'
+-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+-          />
+-        </label>
+-        <button type='button' className='primary' onClick={() => void handleUpload()} disabled={uploading}>
+-          {uploading ? 'Uploading…' : 'Upload document'}
++      <div style={{ marginBottom: 12 }}>
++        <button type='button' className='primary' onClick={() => setModalOpen(true)}>
++          Add resource
+         </button>
+       </div>
+ 
++      {modalOpen && (
++        <div className='admin-panel-modal-overlay'>
++          <div className='admin-panel-modal-card'>
++            <button
++              type='button'
++              aria-label='Close add resource dialog'
++              onClick={closeModal}
++              className='admin-panel-modal-close'
++            >
++              x
++            </button>
++            <h3>Add a resource</h3>
++            {formError && (
++              <p className='muted' role='alert' style={{ color: '#b91c1c' }}>
++                {formError}
++              </p>
++            )}
++            <label>
++              Title
++              <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder='e.g. Week 1 worksheet' />
++            </label>
++            <label>
++              Description (optional)
++              <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} />
++            </label>
++            <label>
++              Link to coaching plan (optional)
++              <select value={planId} onChange={(event) => setPlanId(event.target.value)}>
++                <option value=''>No plan —
+```
+
+### `generated/frontend-app/src/components/calendar/CalendarViews.tsx` (modified)
+
+```diff
+@@ -86,6 +86,7 @@ export function MonthCalendarView({
+   onEditSession,
+   onEditUnavailable,
+ }: MonthCalendarViewProps) {
++  const todayKey = toDateKey(new Date());
+   return (
+     <>
+       <div className='calendar-weekdays'>
+@@ -97,6 +98,7 @@ export function MonthCalendarView({
+       <div className='calendar-grid'>
+         {calendarDays.map(({ date, inCurrentMonth }) => {
+           const key = toDateKey(date);
++          const isToday = key === todayKey;
+           const daySessions = sessionsByDate.get(key) ?? [];
+           const dayUnavailable = unavailableByDate.get(key) ?? [];
+           const dayAvailability = availabilityByDate.get(key) ?? [];
+@@ -104,11 +106,12 @@ export function MonthCalendarView({
+             'calendar-cell',
+             !inCurrentMonth ? 'outside-month' : '',
+             dayAvailability.length ? 'available-day' : '',
++            isToday ? 'today' : '',
+           ].filter(Boolean).join(' ');
+           return (
+             <div key={key} className={dayClassName}>
+               <div className='calendar-cell-header'>
+-                <span>{date.getDate()}</span>
++                <span className={isToday ? 'calendar-today-number' : undefined}>{date.getDate()}</span>
+                 <button type='button' className='calendar-add' onClick={() => onCreateSession(date)}>+</button>
+               </div>
+               {dayAvailability.length > 0 && (
+@@ -158,15 +161,17 @@ export function WeekCalendarView({
+   onEditSession,
+   onEditUnavailable,
+ }: WeekCalendarViewProps) {
++  const todayKey = toDateKey(new Date());
+   return (
+     <div className='week-scheduler'>
+       <div className='week-header-row'>
+         <div className='week-time-header'>Time</div>
+         {weekDays.map((day) => {
+           const dayKey = toDateKey(day);
++          const isToday = dayKey === todayKey;
+           const hasDayAvailability = weekHours.some((hour) => (weekAvailabilityByHour.get(`${dayKey}|${hour}`)?.length ?? 0) > 0);
+           return (
+-            <div key={dayKey} className='week-day-header'>
++            <div key={dayKey} className={isToday ? 'week-day-header today' : 'week-day-header'}>
+               <span>{WEEKDAY_LABELS[(day.getDay() + 6) % 7]}</span>
+               <strong>{day.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</strong>
+               {hasDayAvailability && <small className='week-availability-pill'>Available</small>}
+```
+
+### `generated/frontend-app/src/styles.css` (modified)
+
+```diff
+@@ -353,6 +353,16 @@ button:not([class]):disabled {
+   text-transform: uppercase;
+ }
+ 
++.week-day-header.today {
++  background: linear-gradient(180deg, #eff5ff 0%, #ffffff 100%);
++  box-shadow: inset 0 2px 0 0 #2563eb;
++  border-radius: 8px 8px 0 0;
++}
 +
-+    def test_execute_nonzero_exit_not_succeeded(self) -> None:
-+        runner = FakeRunner(returncode=1, stdout="", stderr="boom")
-+        agent = AgenticDeveloperAgent(agent_command="aider --message-file {prompt_file}", runner=runner)
-+        with tempfile.TemporaryDirectory() as tmp:
-+            result = agent.run(task="Refactor X", cwd=tmp, execute=True)
-+        self.assertTrue(result.executed)
-+        self.assertFalse(result.succeeded)
-+        self.assertEqual(result.returncode, 1)
++.week-day-header.today strong {
++  color: #2563eb;
++}
 +
-+    def test_report_written_to_cwd(self) -> None:
-+        runner = FakeRunner()
-+        agent = AgenticDeveloperAgent(agent_command="aider --message-file {prompt_file}", runner=runner)
-+        with tempfile.TemporaryDirectory() as tmp:
-+            result = agent.run(task="Refactor X", cwd=tmp, execute=False)
-+            self.assertTrue((Path(tmp) / REPORT_FILENAME).exists())
-+            self.assertEqual(result.report_path, str(Path(tmp) / REPORT_FILENAME))
+ .week-availability-pill {
+   display: inline-block;
+   font-size: 10px;
+@@ -447,6 +457,100 @@ button:not([class]):disabled {
+   background: #f7fbfa;
+ }
+ 
++.calendar-cell.today {
++  border-color: #2563eb;
++  box-shadow: inset 0 0 0 1px #2563eb;
++  background: linear-gradient(180deg, #eff5ff 0%, #ffffff 32%);
++}
 +
-+    def test_missing_cwd_rejected(self) -> None:
-+        agent = AgenticDeveloperAgent(agent_command="aider {prompt_file}")
-+        with self.assertRaises(AgenticDeveloperAgentError):
-+            agent.run(task="x", cwd="/path/that/does/not/exist/xyz", execute=False)
++.resource-highlight {
++  border-radius: 10px;
++  animation: resource-flash 2.5s ease;
++}
 +
-+    def test_prompt_file_cleaned_up(self) -> None:
-+        runner = FakeRunner()
-+        agent = AgenticDeveloperAgent(agent_command="aider --message-file {prompt_file}", runner=runner)
-+        with tempfile.TemporaryDirectory() as tmp:
-+            result = agent.run(task="Refactor X", cwd=tmp, execute=True)
-+        self.assertFalse(Path(result.prompt_file).exists())
++@keyframes resource-flash {
++  0%, 40% {
++    background: #eff5ff;
++    box-shadow: 0 0 0 2px #2563eb;
++  }
++  100% {
++    background: transparent;
++    box-shadow: 0 0 0 0 transparent;
++  }
++}
 +
++.resource-list {
++  list-style: none;
++  margin: 0.8rem 0 0;
++  padding: 0;
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++}
 +
-+if __name__ == "__main__":
-+    unittest.main()
++.resource-item {
++  display: flex;
++  justify-content: space-between;
++  align-items: flex-start;
++  gap: 12px;
++  padding: 12px 14px;
++  border: 1px solid var(--line);
++  border-radius: 10px;
++  background: #fff;
++}
++
++.resource-item-main {
++  min-width: 0;
++  flex: 1 1 auto;
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++}
++
++.resource-filename {
++  font-size: 13px;
++  color: var(--muted);
++  white-space: nowrap;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  max-width: 100%;
++}
++
++.resource-actions {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  flex-shrink: 0;
++}
++
++.resource-download {
++  display: inline-block;
++  padding: 6px 14px;
++  border-radius: 8px;
++  background: #0b766e;
++  color: #fff;
++  text-decoration: none;
++  white-space: nowrap;
++  font-size: 14px;
++}
++
++.resource-download:hover {
++  background: #0a655e;
++}
++
++.calendar-today-number {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  min-width: 20px;
++  height: 20px;
++  padding: 0 4px;
++  border-radius: 999px;
++  background: #2563eb;
++  color: #fff;
++  font-weight: 700;
++}
++
+ .calendar-cell-header {
+   display: flex;
+   justify-content: space-between;
+@@ -536,8 +640,12 @@ button:hover,
+   to { opacity: 1; transform: translateY(0); }
+ }
+ 
++/* Note: no `forwards`/`both` fill mode here. Retaining the final keyframe's
++   transform would leave a lingering (non-none) transform on these elements,
++   turning `.workspace` into a containing block for `position: fixed` modals
++   and pushing them out of the viewport on tall pages. */
+ .app-shell > * {
+-  animation: ux-fade-in 0.28s ease both;
++  animation: ux-fade-in 0.28s ease;
+ }
+ 
+ /* Respect users who prefer reduced motion: disable transitions and
+```
+
+### `generated/frontend-app/src/types.ts` (modified)
+
+```diff
+@@ -102,10 +102,26 @@ export interface ResourceItem {
+   scope: string;
+   planId: string | null;
+   planTitle: string | null;
++  sharedWith: string[];
+   fileUrl: string | null;
+   fileName: string | null;
+   ownerUsername: string;
+   createdAt: string;
+ }
+ 
++export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created' | 'resource_added';
++
++export interface NotificationItem {
++  id: string;
++  actorName: string;
++  type: NotificationType;
++  message: string;
++  targetType: 'plan' | 'action' | 'session' | 'insight' | 'resource' | '';
++  targetId: string | null;
++  planId: string | null;
++  actionId: string | null;
++  isRead: boolean;
++  createdAt: string;
++}
++
+ export type { CalendarSession, WeeklyAvailabilityWindow, UnavailablePeriod } from './types/calendarTypes';
 ```
