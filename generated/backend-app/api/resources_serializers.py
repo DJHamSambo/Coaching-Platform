@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.contrib.auth.models import User
 from api.models import Resource
 
 
@@ -7,6 +8,12 @@ class ResourcesSerializer(serializers.ModelSerializer):
     file_name = serializers.SerializerMethodField()
     owner_username = serializers.CharField(source="owner.username", read_only=True)
     plan_title = serializers.CharField(source="plan.title", read_only=True, default=None)
+    shared_with = serializers.SlugRelatedField(
+        slug_field="username",
+        queryset=User.objects.all(),
+        many=True,
+        required=False,
+    )
 
     class Meta:
         model = Resource
@@ -18,6 +25,7 @@ class ResourcesSerializer(serializers.ModelSerializer):
             "scope",
             "plan",
             "plan_title",
+            "shared_with",
             "file",
             "file_url",
             "file_name",

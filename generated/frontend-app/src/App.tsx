@@ -100,6 +100,7 @@ export default function App() {
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const [focusActionId, setFocusActionId] = useState<string | null>(null);
+  const [focusResourceId, setFocusResourceId] = useState<string | null>(null);
 
   const unreadCount = useMemo(() => notifications.filter((item) => !item.isRead).length, [notifications]);
 
@@ -289,6 +290,11 @@ export default function App() {
       setActiveModule('calendar');
       return;
     }
+    if (notification.targetType === 'resource') {
+      setFocusResourceId(notification.targetId ?? null);
+      setActiveModule('resources');
+      return;
+    }
     if (notification.targetType === 'insight') {
       setActiveModule('insights');
       return;
@@ -472,7 +478,14 @@ export default function App() {
 
         {activeModule === 'calendar' && <CalendarPanel coachees={coachees} currentUser={currentUser} />}
 
-        {activeModule === 'resources' && <ResourceLibrary plans={plans} currentUser={currentUser} />}
+        {activeModule === 'resources' && (
+          <ResourceLibrary
+            plans={plans}
+            currentUser={currentUser}
+            focusResourceId={focusResourceId}
+            onFocusHandled={() => setFocusResourceId(null)}
+          />
+        )}
 
         {activeModule === 'activity' && (
           <ActivityFeed

@@ -86,6 +86,7 @@ export function MonthCalendarView({
   onEditSession,
   onEditUnavailable,
 }: MonthCalendarViewProps) {
+  const todayKey = toDateKey(new Date());
   return (
     <>
       <div className='calendar-weekdays'>
@@ -97,6 +98,7 @@ export function MonthCalendarView({
       <div className='calendar-grid'>
         {calendarDays.map(({ date, inCurrentMonth }) => {
           const key = toDateKey(date);
+          const isToday = key === todayKey;
           const daySessions = sessionsByDate.get(key) ?? [];
           const dayUnavailable = unavailableByDate.get(key) ?? [];
           const dayAvailability = availabilityByDate.get(key) ?? [];
@@ -104,11 +106,12 @@ export function MonthCalendarView({
             'calendar-cell',
             !inCurrentMonth ? 'outside-month' : '',
             dayAvailability.length ? 'available-day' : '',
+            isToday ? 'today' : '',
           ].filter(Boolean).join(' ');
           return (
             <div key={key} className={dayClassName}>
               <div className='calendar-cell-header'>
-                <span>{date.getDate()}</span>
+                <span className={isToday ? 'calendar-today-number' : undefined}>{date.getDate()}</span>
                 <button type='button' className='calendar-add' onClick={() => onCreateSession(date)}>+</button>
               </div>
               {dayAvailability.length > 0 && (
@@ -158,15 +161,17 @@ export function WeekCalendarView({
   onEditSession,
   onEditUnavailable,
 }: WeekCalendarViewProps) {
+  const todayKey = toDateKey(new Date());
   return (
     <div className='week-scheduler'>
       <div className='week-header-row'>
         <div className='week-time-header'>Time</div>
         {weekDays.map((day) => {
           const dayKey = toDateKey(day);
+          const isToday = dayKey === todayKey;
           const hasDayAvailability = weekHours.some((hour) => (weekAvailabilityByHour.get(`${dayKey}|${hour}`)?.length ?? 0) > 0);
           return (
-            <div key={dayKey} className='week-day-header'>
+            <div key={dayKey} className={isToday ? 'week-day-header today' : 'week-day-header'}>
               <span>{WEEKDAY_LABELS[(day.getDay() + 6) % 7]}</span>
               <strong>{day.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</strong>
               {hasDayAvailability && <small className='week-availability-pill'>Available</small>}

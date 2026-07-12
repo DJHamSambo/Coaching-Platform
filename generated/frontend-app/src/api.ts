@@ -438,7 +438,7 @@ interface ApiNotification {
 }
 
 function toNotificationItem(n: ApiNotification): NotificationItem {
-  const targetType = (['plan', 'action', 'session', 'insight'].includes(n.target_type)
+  const targetType = (['plan', 'action', 'session', 'insight', 'resource'].includes(n.target_type)
     ? n.target_type
     : '') as NotificationItem['targetType'];
   return {
@@ -999,6 +999,7 @@ interface ApiResource {
   scope: string;
   plan: number | null;
   plan_title: string | null;
+  shared_with?: string[];
   file_url: string | null;
   file_name: string | null;
   owner_username: string;
@@ -1014,6 +1015,7 @@ function toResourceItem(r: ApiResource): ResourceItem {
     scope: r.scope ?? '',
     planId: r.plan ? String(r.plan) : null,
     planTitle: r.plan_title ?? null,
+    sharedWith: r.shared_with ?? [],
     fileUrl: r.file_url ?? null,
     fileName: r.file_name ?? null,
     ownerUsername: r.owner_username ?? '',
@@ -1031,12 +1033,14 @@ export async function createResource(payload: {
   title: string;
   description?: string;
   planId?: string | null;
+  sharedWith?: string[];
   file: File;
 }): Promise<ResourceItem> {
   const form = new FormData();
   form.append('title', payload.title);
   form.append('description', payload.description ?? '');
   if (payload.planId) form.append('plan', payload.planId);
+  (payload.sharedWith ?? []).forEach((username) => form.append('shared_with', username));
   form.append('file', payload.file);
   const created = await request<ApiResource>('/api/resources/', { method: 'POST', body: form });
   return toResourceItem(created);

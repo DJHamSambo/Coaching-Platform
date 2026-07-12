@@ -159,6 +159,7 @@ class Notification(models.Model):
         ("session_booked", "Session Booked"),
         ("task_assigned", "Task Assigned"),
         ("action_created", "Action Created"),
+        ("resource_added", "Resource Added"),
     ]
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
     actor_name = models.CharField(max_length=150, blank=True, default="", help_text="Display name of who triggered the notification")
@@ -202,6 +203,12 @@ class Resource(models.Model):
         help_text="Optional coaching plan this resource is shared against",
     )
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="resources")
+    shared_with = models.ManyToManyField(
+        User,
+        blank=True,
+        related_name="shared_resources",
+        help_text="Users this resource has been explicitly shared with",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
