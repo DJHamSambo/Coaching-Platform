@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PlanList } from './components/PlanList';
 import { PlanDetail } from './components/PlanDetail';
 import { CalendarPanel } from './components/CalendarPanel';
 import { AdministrationPanel } from './components/AdministrationPanel';
 import { InsightsJournal } from './components/InsightsJournal';
 import { ResourceLibrary } from './components/ResourceLibrary';
+import { ActivityFeed } from './components/ActivityFeed';
 import { LoginScreen } from './components/LoginScreen';
 import { ForcePasswordReset } from './components/ForcePasswordReset';
 import {
@@ -17,11 +18,14 @@ import {
   listAdminCoachees,
   listCoachDirectory,
   listInsights,
+  listNotifications,
   listPlans,
+  markAllNotificationsRead,
+  markNotificationRead,
   updateInsight,
 } from './api';
 import { SESSION_EXPIRED_MESSAGE } from './constants/messages';
-import type { AdminCoachee, AdminCoach, CoachingPlan, CurrentUser, InsightItem } from './types';
+import type { AdminCoachee, AdminCoach, CoachingPlan, CurrentUser, InsightItem, NotificationItem } from './types';
 
 const CALENDAR_FEATURE_ENABLED = import.meta.env.VITE_ENABLE_CALENDAR !== 'false';
 
@@ -30,6 +34,7 @@ const MODULES = [
   { key: 'insights', label: 'Insights', enabled: true },
   { key: 'calendar', label: 'Calendar', enabled: CALENDAR_FEATURE_ENABLED },
   { key: 'resources', label: 'Resources', enabled: true },
+  { key: 'activity', label: 'Activity', enabled: true },
   { key: 'administration', label: 'Administration', enabled: true },
 ] as const;
 
@@ -41,6 +46,7 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
     insights: 'Capture and revisit private reflections and progress notes for each coachee.',
     calendar: 'Schedule sessions and manage your availability with coachees.',
     resources: 'Upload and share documents, linking them to the coaching plans they support.',
+    activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
     administration: 'Manage coaches, coachees, and their account access.',
   },
   admin: {
@@ -48,6 +54,7 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
     insights: 'Review reflections and progress notes captured across the platform.',
     calendar: 'Oversee sessions and availability across coaches and coachees.',
     resources: 'Oversee documents shared across coaching plans on the platform.',
+    activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
     administration: 'Manage coaches, coachees, and their account access.',
   },
   coachee: {
@@ -55,6 +62,7 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
     insights: 'Capture and revisit your private reflections and progress notes.',
     calendar: 'View upcoming sessions and request time with your coach.',
     resources: 'Upload and share documents with your coach to support your plans.',
+    activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
     administration: 'Manage your account access.',
   },
 };
@@ -87,6 +95,14 @@ export default function App() {
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [insightsError, setInsightsError] = useState<string | null>(null);
   const [selectedInsightCoachee, setSelectedInsightCoachee] = useState<string | null>(null);
+
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
+  const [focusActionId, setFocusActionId] = useState<string | null>(null);
+  const [focusResourceId, setFocusResourceId] = useState<string | null>(null);
+
+  const unreadCount = useMemo(() => notifications.filter((item) => !item.isRead).length, [notifications]);
 
   useEffect(() => {
     let cancelled = false;
@@ -203,6 +219,98 @@ export default function App() {
     };
   }, [currentUser]);
 
+  const refreshNotifications = useCallback(async (): Promise<void> => {
+    try {
+      const items = await listNotifications();
+      setNotifications(items);
+      setNotificationsError(null);
+    } catch {
+      setNotificationsError('Could not load activity.');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+    setNotificationsLoading(true);
+    listNotifications()
+      .then((items) => {
+        if (!cancelled) {
+          setNotifications(items);
+          setNotificationsError(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setNotificationsError('Could not load activity.');
+      })
+      .finally(() => {
+        if (!cancelled) setNotificationsLoading(false);
+      });
+
+    const interval = setInterval(() => {
+      listNotifications()
+        .then((items) => {
+          if (!cancelled) setNotifications(items);
+        })
+        .catch(() => {
+          /* silent poll failure */
+        });
+    }, 20000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [currentUser]);
+
+  async function handleOpenNotification(notification: NotificationItem): Promise<void> {
+    if (!notification.isRead) {
+      setNotifications((prev) =>
+        prev.map((item) => (item.id === notification.id ? { ...item, isRead: true } : item)),
+      );
+      try {
+        await markNotificationRead(notification.id);
+      } catch {
+        /* keep optimistic state; will resync on next poll */
+      }
+    }
+
+    if ((notification.targetType === 'plan' || notification.targetType === 'action') && notification.planId) {
+      const plan = plans.find((item) => item.id === notification.planId);
+      if (plan) {
+        setFocusActionId(
+          notification.targetType === 'action' ? notification.actionId ?? notification.targetId : null,
+        );
+        setSelectedPlan(plan);
+        setActiveModule('plans');
+        return;
+      }
+    }
+    if (notification.targetType === 'session') {
+      setActiveModule('calendar');
+      return;
+    }
+    if (notification.targetType === 'resource') {
+      setFocusResourceId(notification.targetId ?? null);
+      setActiveModule('resources');
+      return;
+    }
+    if (notification.targetType === 'insight') {
+      setActiveModule('insights');
+      return;
+    }
+    setActiveModule('activity');
+  }
+
+  async function handleMarkAllNotificationsRead(): Promise<void> {
+    setNotifications((prev) => prev.map((item) => ({ ...item, isRead: true })));
+    try {
+      await markAllNotificationsRead();
+    } catch {
+      void refreshNotifications();
+    }
+  }
+
   async function handleCreatePlan(planData: Omit<CoachingPlan, 'id' | 'createdAt' | 'coacheeName'>): Promise<void> {
     try {
       const created = await createPlan(planData);
@@ -311,10 +419,31 @@ export default function App() {
           <button
             key={module.key}
             className={module.key === activeModule ? 'tab active' : 'tab'}
-            onClick={() => setActiveModule(module.key)}
+            onClick={() => {
+              setActiveModule(module.key);
+              if (module.key === 'activity') {
+                void refreshNotifications();
+              }
+            }}
             type='button'
           >
             {module.label}
+            {module.key === 'activity' && unreadCount > 0 && (
+              <span
+                aria-label={`${unreadCount} unread`}
+                style={{
+                  marginLeft: 6,
+                  background: '#e5484d',
+                  color: '#fff',
+                  borderRadius: 999,
+                  padding: '0 6px',
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                }}
+              >
+                {unreadCount}
+              </span>
+            )}
           </button>
         ))}
       </nav>
@@ -342,12 +471,35 @@ export default function App() {
             currentUser={currentUser}
             onBack={() => setSelectedPlan(null)}
             onPlanUpdated={handlePlanUpdated}
+            focusActionId={focusActionId}
+            onFocusHandled={() => setFocusActionId(null)}
           />
         )}
 
         {activeModule === 'calendar' && <CalendarPanel coachees={coachees} currentUser={currentUser} />}
 
-        {activeModule === 'resources' && <ResourceLibrary plans={plans} currentUser={currentUser} />}
+        {activeModule === 'resources' && (
+          <ResourceLibrary
+            plans={plans}
+            currentUser={currentUser}
+            focusResourceId={focusResourceId}
+            onFocusHandled={() => setFocusResourceId(null)}
+          />
+        )}
+
+        {activeModule === 'activity' && (
+          <ActivityFeed
+            notifications={notifications}
+            loading={notificationsLoading}
+            error={notificationsError}
+            onOpen={(notification) => {
+              void handleOpenNotification(notification);
+            }}
+            onMarkAllRead={() => {
+              void handleMarkAllNotificationsRead();
+            }}
+          />
+        )}
 
         {activeModule === 'insights' && (
           <>

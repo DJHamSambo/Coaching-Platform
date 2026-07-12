@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.models import Coachee, CoachingPlan, Message, Session, WeeklyAvailabilityWindow, UnavailablePeriod
+from api.notifications import notify, resolve_recipient
 from api.permissions import OwnsObjectPermission
 from api.sessions_serializers import SessionsSerializer, WeeklyAvailabilityWindowSerializer, UnavailablePeriodSerializer
 from api.administration_serializers import CoachDirectorySerializer
@@ -204,12 +205,35 @@ class SessionsListView(generics.ListCreateAPIView):
                 task_id=None,
                 mentions="",
             )
+            notify(
+                coach,
+                self.request.user.username,
+                "session_booked",
+                f"{self.request.user.username} booked a session with you: {created.title}",
+                target_type="session",
+                target_id=created.id,
+                plan_id=coaching_plan.id if coaching_plan else None,
+            )
             return
 
         # Coach creating session
-        coachee_id = serializer.validated_data.get("coachee")
-        coaching_plan = _resolve_coaching_plan(self.request, coachee_id)
-        serializer.save(owner=self.request.user, requested_by="coach", coaching_plan=coaching_plan)
+        coachee_obj = serializer.validated_data.get("coachee")
+        coaching_plan = _resolve_coaching_plan(self.request, coachee_obj)
+        created = serializer.save(owner=self.request.user, requested_by="coach", coaching_plan=coaching_plan)
+
+        # Notify the coachee that the coach booked a session with them.
+        recipient = None
+        if coachee_obj is not None:
+            recipient = getattr(coachee_obj, "user", None) or resolve_recipient(getattr(coachee_obj, "name", ""))
+        notify(
+            recipient,
+            self.request.user.username,
+            "session_booked",
+            f"{self.request.user.username} booked a session with you: {created.title}",
+            target_type="session",
+            target_id=created.id,
+            plan_id=coaching_plan.id if coaching_plan else None,
+        )
 
 
 class SessionsDetailView(generics.RetrieveUpdateDestroyAPIView):

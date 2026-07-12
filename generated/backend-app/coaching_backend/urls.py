@@ -12,6 +12,7 @@ from api.messages_views import MessagesListView, MessagesDetailView
 from api.coachees_views import CoacheesListView, CoacheesDetailView
 from api.plans_views import PlansListView, PlansDetailView, PlanActionsListView, PlanActionsDetailView
 from api.insights_views import InsightsListView, InsightsDetailView
+from api.notifications_views import NotificationsListView, NotificationsDetailView, mark_all_read
 from api.sessions_views import (
     MyCalendarCoachesListView,
     SessionsListView,
@@ -62,6 +63,10 @@ urlpatterns = [
     path("api/messages/<int:pk>/", MessagesDetailView.as_view(), name="messages-detail"),
     path("api/insights/", InsightsListView.as_view(), name="insights-list"),
     path("api/insights/<int:pk>/", InsightsDetailView.as_view(), name="insights-detail"),
+    # Activity notifications
+    path("api/notifications/", NotificationsListView.as_view(), name="notifications-list"),
+    path("api/notifications/mark-all-read/", mark_all_read, name="notifications-mark-all-read"),
+    path("api/notifications/<int:pk>/", NotificationsDetailView.as_view(), name="notifications-detail"),
     # Shared coaching resources / documents (optionally linked to a plan)
     path("api/resources/", ResourcesListView.as_view(), name="resources-list"),
     path("api/resources/<int:pk>/", ResourcesDetailView.as_view(), name="resources-detail"),

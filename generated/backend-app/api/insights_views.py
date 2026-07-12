@@ -3,6 +3,7 @@ from rest_framework.exceptions import PermissionDenied
 from django.db.models import Q
 from api.insights_serializers import InsightsSerializer
 from api.models import Coachee
+from api.notifications import notify_mentions
 
 
 class InsightsListView(generics.ListCreateAPIView):
@@ -39,7 +40,15 @@ class InsightsListView(generics.ListCreateAPIView):
             return queryset
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        insight = serializer.save(owner=self.request.user)
+        actor_name = insight.author or getattr(self.request.user, "username", "") or ""
+        notify_mentions(
+            actor_name,
+            insight.title,
+            area_label="an insight",
+            target_type="insight",
+            target_id=insight.id,
+        )
 
 
 class InsightsDetailView(generics.RetrieveUpdateDestroyAPIView):

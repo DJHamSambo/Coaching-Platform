@@ -3,6 +3,7 @@ from rest_framework import generics, permissions
 from rest_framework.exceptions import PermissionDenied
 
 from api.models import CoachingPlan, Resource
+from api.notifications import notify
 from api.plans_views import _is_coachee_user, _linked_coachee_profiles, _resolve_owner
 from api.resources_serializers import ResourcesSerializer
 
@@ -30,7 +31,7 @@ class ResourcesListView(generics.ListCreateAPIView):
         user = self.request.user
         accessible_plan_ids = _accessible_plans(self.request).values_list("id", flat=True)
         queryset = Resource.objects.filter(
-            Q(owner=user) | Q(plan_id__in=list(accessible_plan_ids))
+            Q(owner=user) | Q(plan_id__in=list(accessible_plan_ids)) | Q(shared_with=user)
         ).distinct()
         plan_id = self.request.query_params.get("plan")
         if plan_id:
@@ -39,7 +40,19 @@ class ResourcesListView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         _validate_plan_link(self.request, serializer.validated_data.get("plan"))
-        serializer.save(owner=self.request.user)
+        resource = serializer.save(owner=self.request.user)
+
+        # Notify each user the resource was explicitly shared with.
+        actor_name = getattr(self.request.user, "username", "") or ""
+        for recipient in resource.shared_with.all():
+            notify(
+                recipient,
+                actor_name,
+                "resource_added",
+                f'{actor_name} shared a resource with you: {resource.title}',
+                target_type="resource",
+                target_id=resource.id,
+            )
 
 
 class ResourcesDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -50,7 +63,7 @@ class ResourcesDetailView(generics.RetrieveUpdateDestroyAPIView):
         user = self.request.user
         accessible_plan_ids = _accessible_plans(self.request).values_list("id", flat=True)
         return Resource.objects.filter(
-            Q(owner=user) | Q(plan_id__in=list(accessible_plan_ids))
+            Q(owner=user) | Q(plan_id__in=list(accessible_plan_ids)) | Q(shared_with=user)
         ).distinct()
 
     def perform_update(self, serializer):

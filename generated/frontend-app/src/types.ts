@@ -102,9 +102,25 @@ export interface ResourceItem {
   scope: string;
   planId: string | null;
   planTitle: string | null;
+  sharedWith: string[];
   fileUrl: string | null;
   fileName: string | null;
   ownerUsername: string;
+  createdAt: string;
+}
+
+export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created' | 'resource_added';
+
+export interface NotificationItem {
+  id: string;
+  actorName: string;
+  type: NotificationType;
+  message: string;
+  targetType: 'plan' | 'action' | 'session' | 'insight' | 'resource' | '';
+  targetId: string | null;
+  planId: string | null;
+  actionId: string | null;
+  isRead: boolean;
   createdAt: string;
 }
 
