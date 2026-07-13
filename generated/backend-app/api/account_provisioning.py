@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import secrets
 import string
+from datetime import timedelta
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.core.mail import send_mail
+from django.core.mail import EmailMultiAlternatives
+from django.utils import timezone
+from django.utils.html import escape
 
-from api.models import Coachee, UserProfile
+from api.models import Coachee, EmailVerificationToken, UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -57,64 +62,136 @@ def mark_must_reset_password(user: User, value: bool = True) -> None:
     UserProfile.objects.update_or_create(user=user, defaults={"must_reset_password": value})
 
 
-def send_welcome_email(*, user: User, temp_password: str, role: str) -> None:
-    """Send a welcome email with temporary credentials. Never raises."""
+def mark_email_verified(user: User, value: bool = True) -> None:
+    """Record whether the user has confirmed their email address."""
+    UserProfile.objects.update_or_create(user=user, defaults={"email_verified": value})
+
+
+def hash_token(raw_token: str) -> str:
+    """Return the SHA-256 hex digest used to look up a stored token."""
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def create_activation_token(
+    user: User, *, purpose: str = EmailVerificationToken.PURPOSE_ACTIVATION
+) -> str:
+    """Issue a fresh single-use activation token for the user.
+
+    Any previously issued, still-unused tokens for the same purpose are
+    invalidated so only the latest link works. Returns the raw token (emailed to
+    the user); only its hash is persisted.
+    """
+    EmailVerificationToken.objects.filter(
+        user=user, purpose=purpose, used_at__isnull=True
+    ).update(used_at=timezone.now())
+
+    raw_token = secrets.token_urlsafe(48)
+    ttl_hours = getattr(settings, "ACCOUNT_ACTIVATION_TOKEN_TTL_HOURS", 72)
+    EmailVerificationToken.objects.create(
+        user=user,
+        token_hash=hash_token(raw_token),
+        purpose=purpose,
+        expires_at=timezone.now() + timedelta(hours=ttl_hours),
+    )
+    return raw_token
+
+
+def build_activation_link(raw_token: str) -> str:
+    """Build the SPA activation URL that carries the raw token."""
+    base = getattr(settings, "ACCOUNT_ACTIVATION_URL", "") or ""
+    return f"{base}?{urlencode({'token': raw_token})}"
+
+
+def send_activation_email(*, user: User, raw_token: str, role: str) -> None:
+    """Email a secure activation link so the user can verify and set a password.
+
+    No password is ever transmitted. Never raises — email failures are logged so
+    they don't block account provisioning.
+    """
     recipient = (user.email or "").strip()
     if not recipient:
-        logger.warning("No email on record for %s; skipping welcome email.", user.username)
+        logger.warning("No email on record for %s; skipping activation email.", user.username)
         return
 
     role_label = "coach" if role == "coach" else "coachee"
-    login_url = getattr(settings, "FRONTEND_LOGIN_URL", "")
     greeting_name = (user.get_full_name() or user.username).strip()
+    activation_link = build_activation_link(raw_token)
+    ttl_hours = getattr(settings, "ACCOUNT_ACTIVATION_TOKEN_TTL_HOURS", 72)
 
-    lines = [
+    text_lines = [
         f"Hi {greeting_name},",
         "",
-        f"Welcome to the Coaching Platform! An account has been created for you as a {role_label}.",
+        f"An account has been created for you on the Coaching Platform as a {role_label}.",
         "",
-        "Use these temporary credentials to sign in:",
-        f"    Username: {user.username}",
-        f"    Temporary password: {temp_password}",
+        "To activate your account, confirm your email address and choose a password,",
+        "open the link below:",
         "",
-    ]
-    if login_url:
-        lines += [f"Sign in here: {login_url}", ""]
-    lines += [
-        "For your security, you'll be asked to choose a new password the first time you sign in.",
+        activation_link,
         "",
-        "See you inside,",
+        f"This link is valid for {ttl_hours} hours and can only be used once.",
+        "If you didn't expect this email, you can safely ignore it.",
+        "",
         "The Coaching Platform team",
     ]
+    text_body = "\n".join(text_lines)
+
+    safe_name = escape(greeting_name)
+    safe_link = escape(activation_link)
+    html_body = f"""\
+<div style="font-family:Segoe UI,Arial,sans-serif;color:#1f2933;line-height:1.5">
+  <p>Hi {safe_name},</p>
+  <p>An account has been created for you on the <strong>Coaching Platform</strong>
+     as a {role_label}.</p>
+  <p>To activate your account, confirm your email address, and choose a password,
+     click the button below.</p>
+  <p style="margin:24px 0">
+    <a href="{safe_link}"
+       style="background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 20px;
+              border-radius:8px;font-weight:600;display:inline-block">
+      Verify email &amp; set password
+    </a>
+  </p>
+  <p style="font-size:0.9em;color:#52606d">
+    Or paste this link into your browser:<br>
+    <a href="{safe_link}">{safe_link}</a>
+  </p>
+  <p style="font-size:0.85em;color:#7b8794">
+    This link is valid for {ttl_hours} hours and can only be used once.
+    If you didn't expect this email, you can safely ignore it.
+  </p>
+  <p style="font-size:0.85em;color:#7b8794">The Coaching Platform team</p>
+</div>"""
 
     try:
-        send_mail(
-            subject="Welcome to the Coaching Platform",
-            message="\n".join(lines),
+        message = EmailMultiAlternatives(
+            subject="Activate your Coaching Platform account",
+            body=text_body,
             from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
-            recipient_list=[recipient],
-            fail_silently=False,
+            to=[recipient],
         )
-    except Exception:  # pragma: no cover - email transport failures shouldn't block provisioning
-        logger.exception("Failed to send welcome email to %s", recipient)
+        message.attach_alternative(html_body, "text/html")
+        message.send(fail_silently=False)
+    except Exception:  # pragma: no cover - transport failures shouldn't block provisioning
+        logger.exception("Failed to send activation email to %s", recipient)
 
 
-def provision_coach_login(user: User) -> str:
-    """Assign a temporary password to a freshly created coach and email it.
+def provision_coach_login(user: User) -> None:
+    """Prepare a freshly created coach for activation.
 
-    Returns the generated temporary password (for logging/testing only — it is
-    never returned through the API).
+    The account is left inactive with an unusable password until the coach
+    verifies their email and sets a password via the emailed activation link.
     """
-    temp_password = generate_temp_password()
-    user.set_password(temp_password)
-    user.save(update_fields=["password"])
-    mark_must_reset_password(user, True)
-    send_welcome_email(user=user, temp_password=temp_password, role="coach")
-    return temp_password
+    user.set_unusable_password()
+    if user.is_active:
+        user.is_active = False
+    user.save(update_fields=["password", "is_active"])
+    mark_email_verified(user, False)
+    raw_token = create_activation_token(user)
+    send_activation_email(user=user, raw_token=raw_token, role="coach")
 
 
 def provision_coachee_login(coachee: Coachee) -> User | None:
-    """Create a login account for a coachee that has an email but no user yet.
+    """Create an inactive login account for a coachee and email an activation link.
 
     Returns the created ``User`` or ``None`` if no account was provisioned
     (e.g. the coachee already has one or has no email address).
@@ -125,20 +202,22 @@ def provision_coachee_login(coachee: Coachee) -> User | None:
     email = coachee.email.strip()
     base = email.split("@", 1)[0] or coachee.name
     username = _unique_username(base)
-    temp_password = generate_temp_password()
 
-    user = User.objects.create_user(username=username, email=email, password=temp_password)
+    user = User.objects.create_user(username=username, email=email)
+    user.set_unusable_password()
+    user.is_active = False
 
     name_parts = (coachee.name or "").split(" ", 1)
     if name_parts and name_parts[0]:
         user.first_name = name_parts[0][:150]
         if len(name_parts) > 1:
             user.last_name = name_parts[1][:150]
-        user.save(update_fields=["first_name", "last_name"])
+    user.save()
 
     coachee.user = user
     coachee.save(update_fields=["user"])
 
-    mark_must_reset_password(user, True)
-    send_welcome_email(user=user, temp_password=temp_password, role="coachee")
+    mark_email_verified(user, False)
+    raw_token = create_activation_token(user)
+    send_activation_email(user=user, raw_token=raw_token, role="coachee")
     return user

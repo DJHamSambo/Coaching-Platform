@@ -146,6 +146,30 @@ export async function changePassword(payload: {
   });
 }
 
+export async function validateActivationToken(
+  token: string,
+): Promise<{ valid: boolean; username: string; email: string }> {
+  return request(
+    '/api/auth/activate/validate/',
+    { method: 'POST', body: JSON.stringify({ token }) },
+    { skipAuth: true },
+  );
+}
+
+export async function activateAccount(payload: {
+  token: string;
+  newPassword: string;
+}): Promise<{ detail: string; username: string }> {
+  return request(
+    '/api/auth/activate/',
+    {
+      method: 'POST',
+      body: JSON.stringify({ token: payload.token, new_password: payload.newPassword }),
+    },
+    { skipAuth: true },
+  );
+}
+
 function getTokenExpEpochSeconds(token: string): number | null {
   const payload = decodeJwtPayload(token);
   const expValue = payload?.exp;

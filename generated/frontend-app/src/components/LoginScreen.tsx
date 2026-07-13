@@ -42,7 +42,7 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <label>
-            Username
+            {mode === 'login' ? 'Username or email' : 'Username'}
             <input
               autoFocus
               required

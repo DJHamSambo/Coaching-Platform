@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django.contrib.auth.models import User
 from django.db import models
+from django.utils import timezone
 
 
 class UserProfile(models.Model):
@@ -11,11 +12,58 @@ class UserProfile(models.Model):
         default=False,
         help_text="True when the user signed in with a temporary password and must set a new one.",
     )
+    email_verified = models.BooleanField(
+        default=False,
+        help_text="True once the user has confirmed their email via an activation link.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return f"Profile<{self.user.username}>"
+
+
+class EmailVerificationToken(models.Model):
+    """A single-use, time-limited token used to activate/verify an account.
+
+    Only the SHA-256 hash of the token is stored; the raw value is emailed to
+    the user and never persisted. A token is valid when it has not expired and
+    has not already been consumed.
+    """
+
+    PURPOSE_ACTIVATION = "activation"
+    PURPOSE_CHOICES = [
+        (PURPOSE_ACTIVATION, "Account activation"),
+    ]
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="verification_tokens"
+    )
+    token_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    purpose = models.CharField(
+        max_length=32, choices=PURPOSE_CHOICES, default=PURPOSE_ACTIVATION
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"Token<{self.user.username}:{self.purpose}>"
+
+    @property
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+    @property
+    def is_used(self) -> bool:
+        return self.used_at is not None
+
+    def is_valid(self) -> bool:
+        return not self.is_used and not self.is_expired
+
 
 
 class Coachee(models.Model):

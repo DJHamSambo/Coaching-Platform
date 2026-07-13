@@ -3,7 +3,8 @@ from django.conf.urls.static import static
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from api.auth_views import register, me, health, change_password
+from api.auth_views import register, me, health, change_password, EmailOrUsernameTokenObtainPairView
+from api.activation_views import validate_activation_token, activate_account
 from api.resources_views import ResourcesListView, ResourcesDetailView
 from api.administration_views import CoachesListView, CoachesDetailView, AdminCoacheesListView, AdminCoacheesDetailView, CoachDirectoryListView
 from api.users_views import UsersListView, UsersDetailView
@@ -27,9 +28,11 @@ urlpatterns = [
     path("api/auth/register/", register, name="register"),
     path("api/auth/me/", me, name="me"),
     path("api/auth/change-password/", change_password, name="change-password"),
+    path("api/auth/activate/validate/", validate_activation_token, name="activate-validate"),
+    path("api/auth/activate/", activate_account, name="activate"),
     path("api/auth/health/", health, name="health"),
-    path("api/auth/login", TokenObtainPairView.as_view(), name="token_obtain_pair"),
-    path("api/auth/login/", TokenObtainPairView.as_view(), name="token_obtain_pair_slash"),
+    path("api/auth/login", EmailOrUsernameTokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("api/auth/login/", EmailOrUsernameTokenObtainPairView.as_view(), name="token_obtain_pair_slash"),
     path("api/auth/refresh", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/auth/refresh/", TokenRefreshView.as_view(), name="token_refresh_slash"),
     path("api/admin/coaches/", CoachesListView.as_view(), name="admin-coaches-list"),
