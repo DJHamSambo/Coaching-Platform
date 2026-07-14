@@ -8,6 +8,7 @@ import { ResourceLibrary } from './components/ResourceLibrary';
 import { ActivityFeed } from './components/ActivityFeed';
 import { LoginScreen } from './components/LoginScreen';
 import { ForcePasswordReset } from './components/ForcePasswordReset';
+import { AccountActivation } from './components/AccountActivation';
 import {
   clearToken,
   createInsight,
@@ -70,6 +71,9 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
 export default function App() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [activationToken, setActivationToken] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get('token'),
+  );
 
   const enabledModules = useMemo(() => 
     MODULES.filter((item) => {
@@ -373,6 +377,16 @@ export default function App() {
     setSelectedPlan(null);
     setSelectedInsightCoachee(null);
     setActiveModule('plans');
+  }
+
+  function handleActivationDone(): void {
+    // Remove the token from the URL and drop back to the sign-in screen.
+    window.history.replaceState({}, document.title, '/');
+    setActivationToken(null);
+  }
+
+  if (activationToken) {
+    return <AccountActivation token={activationToken} onDone={handleActivationDone} />;
   }
 
   if (authLoading) {

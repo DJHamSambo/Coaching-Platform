@@ -8,9 +8,37 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 from api.account_provisioning import mark_must_reset_password
 from api.models import Coachee, UserProfile
+
+
+class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """Allow signing in with either a username or an email address.
+
+    Provisioned coachee/coach accounts get an auto-generated username they
+    never see, so users naturally try their email. If the supplied login looks
+    like an email, resolve it to the matching account's username before the
+    standard credential check runs.
+    """
+
+    def validate(self, attrs):
+        login = attrs.get(self.username_field, "")
+        if login and "@" in login:
+            match = (
+                User.objects.filter(email__iexact=login.strip())
+                .order_by("id")
+                .first()
+            )
+            if match is not None:
+                attrs[self.username_field] = match.username
+        return super().validate(attrs)
+
+
+class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
+    serializer_class = EmailOrUsernameTokenObtainPairSerializer
 
 
 @api_view(["POST"])

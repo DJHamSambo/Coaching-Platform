@@ -109,7 +109,7 @@ export interface ResourceItem {
   createdAt: string;
 }
 
-export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created' | 'resource_added';
+export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created' | 'plan_assigned' | 'resource_added';
 
 export interface NotificationItem {
   id: string;
