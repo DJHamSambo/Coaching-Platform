@@ -207,6 +207,7 @@ class Notification(models.Model):
         ("session_booked", "Session Booked"),
         ("task_assigned", "Task Assigned"),
         ("action_created", "Action Created"),
+        ("plan_assigned", "Plan Assigned"),
         ("resource_added", "Resource Added"),
     ]
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")

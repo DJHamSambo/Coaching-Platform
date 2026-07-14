@@ -13,6 +13,7 @@ const TYPE_LABEL: Record<NotificationItem['type'], string> = {
   session_booked: 'Session booked',
   task_assigned: 'Action assigned',
   action_created: 'Action assigned',
+  plan_assigned: 'Plan assigned',
   resource_added: 'Resource shared',
 };
 

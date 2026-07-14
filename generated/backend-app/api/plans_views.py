@@ -71,7 +71,22 @@ class PlansListView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         if _is_coachee_user(self.request.user):
             raise PermissionDenied("Coachees cannot create coaching plans.")
-        serializer.save(coach=_resolve_owner(self.request))
+        plan = serializer.save(coach=_resolve_owner(self.request))
+
+        # Notify the assigned coachee that a new plan was created for them.
+        coachee = plan.coachee
+        if coachee is not None:
+            recipient = coachee.user if coachee.user_id else resolve_recipient(coachee.name)
+            actor_name = getattr(self.request.user, "username", "") or ""
+            notify(
+                recipient,
+                actor_name,
+                "plan_assigned",
+                f"{actor_name} assigned you a new coaching plan: {plan.title}",
+                target_type="plan",
+                target_id=plan.id,
+                plan_id=plan.id,
+            )
 
 
 class PlansDetailView(generics.RetrieveUpdateDestroyAPIView):
