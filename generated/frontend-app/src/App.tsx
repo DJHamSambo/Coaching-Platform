@@ -6,6 +6,7 @@ import { AdministrationPanel } from './components/AdministrationPanel';
 import { InsightsJournal } from './components/InsightsJournal';
 import { ResourceLibrary } from './components/ResourceLibrary';
 import { ActivityFeed } from './components/ActivityFeed';
+import { ProfilePanel } from './components/ProfilePanel';
 import { LoginScreen } from './components/LoginScreen';
 import { ForcePasswordReset } from './components/ForcePasswordReset';
 import { AccountActivation } from './components/AccountActivation';
@@ -37,6 +38,7 @@ const MODULES = [
   { key: 'resources', label: 'Resources', enabled: true },
   { key: 'activity', label: 'Activity', enabled: true },
   { key: 'administration', label: 'Administration', enabled: true },
+  { key: 'profile', label: 'Profile', enabled: true },
 ] as const;
 
 type ModuleKey = (typeof MODULES)[number]['key'];
@@ -49,6 +51,7 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
     resources: 'Upload and share documents, linking them to the coaching plans they support.',
     activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
     administration: 'Manage coaches, coachees, and their account access.',
+    profile: 'Manage your coaching contracts, foundational questionnaires, and account details.',
   },
   admin: {
     plans: 'Oversee the coaching plans created across coaches and coachees.',
@@ -57,6 +60,7 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
     resources: 'Oversee documents shared across coaching plans on the platform.',
     activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
     administration: 'Manage coaches, coachees, and their account access.',
+    profile: 'Manage your coaching contracts, foundational questionnaires, and account details.',
   },
   coachee: {
     plans: 'Follow the coaching plans your coach has created for you.',
@@ -65,6 +69,7 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
     resources: 'Upload and share documents with your coach to support your plans.',
     activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
     administration: 'Manage your account access.',
+    profile: 'Manage your coaching contracts, foundational questionnaires, and account details.',
   },
 };
 
@@ -419,9 +424,24 @@ export default function App() {
           <p className='subtitle'>{MODULE_SUBTITLES[currentUser.role][activeModule]}</p>
         </div>
         <div className='hero-account'>
-          <p className='muted'>
-            Signed in as {currentUser.username} ({currentUser.role})
-          </p>
+          <div className='hero-account-user'>
+            <button
+              type='button'
+              className='avatar avatar-sm avatar-button'
+              onClick={() => setActiveModule('profile')}
+              title='View profile'
+              aria-label='View profile'
+            >
+              {currentUser.avatarUrl ? (
+                <img src={currentUser.avatarUrl} alt='' />
+              ) : (
+                <span>{currentUser.username.trim().slice(0, 2).toUpperCase() || '?'}</span>
+              )}
+            </button>
+            <p className='muted'>
+              Signed in as {currentUser.username} ({currentUser.role})
+            </p>
+          </div>
           <button type='button' className='tab' onClick={handleLogout}>
             Sign out
           </button>
@@ -540,6 +560,10 @@ export default function App() {
         )}
 
         {activeModule === 'administration' && <AdministrationPanel currentUser={currentUser} />}
+
+        {activeModule === 'profile' && (
+          <ProfilePanel currentUser={currentUser} onProfileUpdated={setCurrentUser} />
+        )}
       </section>
     </main>
   );

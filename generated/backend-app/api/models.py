@@ -16,6 +16,13 @@ class UserProfile(models.Model):
         default=False,
         help_text="True once the user has confirmed their email via an activation link.",
     )
+    avatar = models.FileField(
+        upload_to="avatars/",
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Optional profile picture shown in the app header.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -266,3 +273,25 @@ class Resource(models.Model):
 
     def __str__(self) -> str:
         return self.title
+
+
+class FoundationalQuestionnaire(models.Model):
+    """A completed foundational questionnaire submitted by a user.
+
+    The questions and answers are stored together as a self-describing list of
+    ``{"question": ..., "answer": ...}`` entries so historical submissions stay
+    intact even if the question set changes later.
+    """
+
+    owner = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="questionnaires"
+    )
+    name = models.CharField(max_length=255, blank=True, default="")
+    answers = models.JSONField(default=list)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-submitted_at"]
+
+    def __str__(self) -> str:
+        return f"Questionnaire<{self.owner.username}:{self.submitted_at:%Y-%m-%d}>"

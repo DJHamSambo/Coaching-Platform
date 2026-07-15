@@ -8,6 +8,18 @@ export interface Coachee {
   notes: string;
 }
 
+export interface QuestionnaireAnswer {
+  question: string;
+  answer: string;
+}
+
+export interface QuestionnaireItem {
+  id: string;
+  name: string;
+  answers: QuestionnaireAnswer[];
+  submittedAt: string;
+}
+
 export interface CurrentUser {
   id: string;
   username: string;
@@ -15,6 +27,7 @@ export interface CurrentUser {
   role: 'admin' | 'coach' | 'coachee';
   isAdmin: boolean;
   mustResetPassword: boolean;
+  avatarUrl: string | null;
 }
 
 export interface AdminCoach {

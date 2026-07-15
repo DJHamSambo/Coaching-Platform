@@ -14,6 +14,8 @@ import type {
   PlanAction,
   PlanStatus,
   PlanTask,
+  QuestionnaireAnswer,
+  QuestionnaireItem,
   ResourceItem,
   TaskStatus,
   UnavailablePeriod,
@@ -108,6 +110,7 @@ interface ApiMe {
   is_admin: boolean;
   role: 'admin' | 'coach' | 'coachee';
   must_reset_password?: boolean;
+  avatar_url?: string | null;
 }
 
 interface ApiListResponse<T> {
@@ -130,7 +133,68 @@ export async function getMe(): Promise<CurrentUser> {
     role: me.role,
     isAdmin: me.is_admin,
     mustResetPassword: Boolean(me.must_reset_password),
+    avatarUrl: me.avatar_url ?? null,
   };
+}
+
+export async function updateProfile(payload: {
+  username?: string;
+  avatarFile?: File | null;
+}): Promise<CurrentUser> {
+  const form = new FormData();
+  if (typeof payload.username === 'string') {
+    form.append('username', payload.username);
+  }
+  if (payload.avatarFile) {
+    form.append('avatar', payload.avatarFile);
+  }
+  const me = await request<ApiMe>('/api/auth/profile/', {
+    method: 'PATCH',
+    body: form,
+  });
+  return {
+    id: String(me.id),
+    username: me.username,
+    email: me.email,
+    role: me.role,
+    isAdmin: me.is_admin,
+    mustResetPassword: Boolean(me.must_reset_password),
+    avatarUrl: me.avatar_url ?? null,
+  };
+}
+
+interface ApiQuestionnaire {
+  id: number;
+  name: string;
+  answers: QuestionnaireAnswer[];
+  submitted_at: string;
+}
+
+function toQuestionnaire(item: ApiQuestionnaire): QuestionnaireItem {
+  return {
+    id: String(item.id),
+    name: item.name,
+    answers: Array.isArray(item.answers) ? item.answers : [],
+    submittedAt: item.submitted_at,
+  };
+}
+
+export async function listQuestionnaires(): Promise<QuestionnaireItem[]> {
+  const payload = await request<ApiQuestionnaire[] | ApiListResponse<ApiQuestionnaire>>(
+    '/api/questionnaires/',
+  );
+  return toListResults(payload).map(toQuestionnaire);
+}
+
+export async function createQuestionnaire(payload: {
+  name: string;
+  answers: QuestionnaireAnswer[];
+}): Promise<QuestionnaireItem> {
+  const created = await request<ApiQuestionnaire>('/api/questionnaires/', {
+    method: 'POST',
+    body: JSON.stringify({ name: payload.name, answers: payload.answers }),
+  });
+  return toQuestionnaire(created);
 }
 
 export async function changePassword(payload: {
