@@ -20,6 +20,37 @@ export interface QuestionnaireItem {
   submittedAt: string;
 }
 
+export interface ContractParty {
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+}
+
+export interface ContractData {
+  agreementDate: string;
+  coach: ContractParty;
+  coachee: ContractParty & { dateOfBirth: string };
+  periodSessions: string;
+  sessionCycle: string;
+  commencementDate: string;
+  totalFee: string;
+  paymentArrangement: 'advance' | 'instalments';
+  coachSignatureName: string;
+  coachSignature: string;
+  coachSignedAt: string;
+  coacheeSignatureName: string;
+  coacheeSignature: string;
+  coacheeSignedAt: string;
+}
+
+export interface ContractItem {
+  id: string;
+  title: string;
+  data: ContractData;
+  createdAt: string;
+}
+
 export interface CurrentUser {
   id: string;
   username: string;
@@ -28,6 +59,7 @@ export interface CurrentUser {
   isAdmin: boolean;
   mustResetPassword: boolean;
   avatarUrl: string | null;
+  phone: string;
 }
 
 export interface AdminCoach {

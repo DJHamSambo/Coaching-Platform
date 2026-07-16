@@ -23,6 +23,12 @@ class UserProfile(models.Model):
         blank=True,
         help_text="Optional profile picture shown in the app header.",
     )
+    phone = models.CharField(
+        max_length=40,
+        blank=True,
+        default="",
+        help_text="Optional contact phone number shown on the account profile.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -295,3 +301,25 @@ class FoundationalQuestionnaire(models.Model):
 
     def __str__(self) -> str:
         return f"Questionnaire<{self.owner.username}:{self.submitted_at:%Y-%m-%d}>"
+
+
+class CoachingContract(models.Model):
+    """A saved executive coaching contract created by a user.
+
+    All of the fillable fields (party details, session terms, signatures) are
+    stored together in a self-describing ``data`` JSON object so that saved
+    contracts remain intact even if the contract template changes later.
+    """
+
+    owner = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="contracts"
+    )
+    title = models.CharField(max_length=255, blank=True, default="Executive Coaching Contract")
+    data = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"Contract<{self.owner.username}:{self.created_at:%Y-%m-%d}>"

@@ -7,6 +7,7 @@ from api.auth_views import register, me, profile, health, change_password, Email
 from api.activation_views import validate_activation_token, activate_account
 from api.resources_views import ResourcesListView, ResourcesDetailView
 from api.questionnaires_views import QuestionnairesListView, QuestionnairesDetailView
+from api.contracts_views import ContractsListView, ContractsDetailView
 from api.administration_views import CoachesListView, CoachesDetailView, AdminCoacheesListView, AdminCoacheesDetailView, CoachDirectoryListView
 from api.users_views import UsersListView, UsersDetailView
 from api.tasks_views import TasksListView, TasksDetailView
@@ -78,6 +79,9 @@ urlpatterns = [
     # Foundational questionnaires submitted by users
     path("api/questionnaires/", QuestionnairesListView.as_view(), name="questionnaires-list"),
     path("api/questionnaires/<int:pk>/", QuestionnairesDetailView.as_view(), name="questionnaires-detail"),
+    # Saved executive coaching contracts
+    path("api/contracts/", ContractsListView.as_view(), name="contracts-list"),
+    path("api/contracts/<int:pk>/", ContractsDetailView.as_view(), name="contracts-detail"),
 ]
 
 if settings.DEBUG:

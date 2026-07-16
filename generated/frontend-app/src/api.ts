@@ -16,6 +16,8 @@ import type {
   PlanTask,
   QuestionnaireAnswer,
   QuestionnaireItem,
+  ContractData,
+  ContractItem,
   ResourceItem,
   TaskStatus,
   UnavailablePeriod,
@@ -111,6 +113,7 @@ interface ApiMe {
   role: 'admin' | 'coach' | 'coachee';
   must_reset_password?: boolean;
   avatar_url?: string | null;
+  phone?: string;
 }
 
 interface ApiListResponse<T> {
@@ -134,12 +137,14 @@ export async function getMe(): Promise<CurrentUser> {
     isAdmin: me.is_admin,
     mustResetPassword: Boolean(me.must_reset_password),
     avatarUrl: me.avatar_url ?? null,
+    phone: me.phone ?? '',
   };
 }
 
 export async function updateProfile(payload: {
   username?: string;
   avatarFile?: File | null;
+  phone?: string;
 }): Promise<CurrentUser> {
   const form = new FormData();
   if (typeof payload.username === 'string') {
@@ -147,6 +152,9 @@ export async function updateProfile(payload: {
   }
   if (payload.avatarFile) {
     form.append('avatar', payload.avatarFile);
+  }
+  if (typeof payload.phone === 'string') {
+    form.append('phone', payload.phone);
   }
   const me = await request<ApiMe>('/api/auth/profile/', {
     method: 'PATCH',
@@ -160,6 +168,7 @@ export async function updateProfile(payload: {
     isAdmin: me.is_admin,
     mustResetPassword: Boolean(me.must_reset_password),
     avatarUrl: me.avatar_url ?? null,
+    phone: me.phone ?? '',
   };
 }
 
@@ -195,6 +204,44 @@ export async function createQuestionnaire(payload: {
     body: JSON.stringify({ name: payload.name, answers: payload.answers }),
   });
   return toQuestionnaire(created);
+}
+
+interface ApiContract {
+  id: number;
+  title: string;
+  data: ContractData;
+  created_at: string;
+}
+
+function toContract(item: ApiContract): ContractItem {
+  return {
+    id: String(item.id),
+    title: item.title,
+    data: item.data,
+    createdAt: item.created_at,
+  };
+}
+
+export async function listContracts(): Promise<ContractItem[]> {
+  const payload = await request<ApiContract[] | ApiListResponse<ApiContract>>(
+    '/api/contracts/',
+  );
+  return toListResults(payload).map(toContract);
+}
+
+export async function createContract(payload: {
+  title: string;
+  data: ContractData;
+}): Promise<ContractItem> {
+  const created = await request<ApiContract>('/api/contracts/', {
+    method: 'POST',
+    body: JSON.stringify({ title: payload.title, data: payload.data }),
+  });
+  return toContract(created);
+}
+
+export async function deleteContract(id: string): Promise<void> {
+  await request<void>(`/api/contracts/${id}/`, { method: 'DELETE' });
 }
 
 export async function changePassword(payload: {

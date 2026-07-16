@@ -81,6 +81,7 @@ def _me_payload(user, request: Request) -> dict:
         "role": role,
         "must_reset_password": must_reset,
         "avatar_url": avatar_url,
+        "phone": profile.phone if profile else "",
     }
 
 
@@ -131,6 +132,18 @@ def profile(request: Request) -> Response:
     if avatar_file is not None:
         profile_obj.avatar = avatar_file
         profile_obj.save(update_fields=["avatar"])
+
+    new_phone = request.data.get("phone")
+    if new_phone is not None:
+        new_phone = str(new_phone).strip()
+        if len(new_phone) > 40:
+            return Response(
+                {"phone": ["Phone number must be 40 characters or fewer."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if new_phone != profile_obj.phone:
+            profile_obj.phone = new_phone
+            profile_obj.save(update_fields=["phone"])
 
     return Response(_me_payload(user, request))
 

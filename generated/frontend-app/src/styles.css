@@ -140,6 +140,83 @@ body {
   margin: 0.25rem 0 0;
   white-space: pre-wrap;
 }
+
+/* Coaching contract list, form, and view */
+.contract-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.contract-list-row .questionnaire-list-item { flex: 1; min-width: 220px; }
+.contract-list-actions { display: flex; gap: 6px; }
+
+.contract-modal-card { width: min(680px, 94vw); }
+
+.contract-fieldset {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem 0.9rem;
+  margin-top: 0.9rem;
+}
+.contract-fieldset legend {
+  font-weight: 700;
+  padding: 0 0.4rem;
+  color: var(--accent);
+}
+
+.contract-terms-preview {
+  margin-top: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+}
+.contract-terms-preview summary { cursor: pointer; font-weight: 600; }
+.contract-term { margin-top: 0.6rem; }
+.contract-term strong { display: block; }
+.contract-term p { margin: 0.2rem 0 0; }
+
+.contract-view { margin: 0.3rem 0 0.6rem; }
+.contract-view-row { display: flex; gap: 8px; padding: 0.15rem 0; }
+.contract-view-row dt { font-weight: 600; min-width: 140px; }
+.contract-view-row dd { margin: 0; }
+.contract-view-signatures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 0.4rem;
+}
+@media (max-width: 640px) {
+  .contract-view-signatures { grid-template-columns: 1fr; }
+}
+.contract-view-signatures > div { display: flex; flex-direction: column; gap: 4px; }
+.contract-view-sig {
+  max-width: 200px;
+  max-height: 70px;
+  border-bottom: 1px solid var(--line);
+  object-fit: contain;
+  align-self: flex-start;
+}
+
+.signature-pad { margin-top: 0.5rem; }
+.signature-pad-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.signature-pad-canvas {
+  width: 100%;
+  max-width: 100%;
+  height: 140px;
+  margin-top: 0.35rem;
+  border: 1px dashed #c7d8d6;
+  border-radius: 8px;
+  background: #fff;
+  touch-action: none;
+  cursor: crosshair;
+}
+.signature-pad-hint { margin: 0.25rem 0 0; }
 .eyebrow {
   margin: 0;
   text-transform: uppercase;

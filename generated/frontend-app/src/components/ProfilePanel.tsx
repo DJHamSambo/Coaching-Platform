@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { updateProfile } from '../api';
 import type { CurrentUser } from '../types';
 import { FoundationalQuestionnaire } from './FoundationalQuestionnaire';
+import { CoachingContract } from './CoachingContract';
 
 interface ProfilePanelProps {
   currentUser: CurrentUser;
@@ -20,6 +21,7 @@ function initialsFor(name: string): string {
 
 export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProps): JSX.Element {
   const [username, setUsername] = useState(currentUser.username);
+  const [phone, setPhone] = useState(currentUser.phone);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -30,6 +32,10 @@ export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProp
   useEffect(() => {
     setUsername(currentUser.username);
   }, [currentUser.username]);
+
+  useEffect(() => {
+    setPhone(currentUser.phone);
+  }, [currentUser.phone]);
 
   // Build (and clean up) an object URL for the locally selected image preview.
   useEffect(() => {
@@ -44,7 +50,8 @@ export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProp
 
   const trimmedUsername = username.trim();
   const usernameChanged = trimmedUsername !== currentUser.username;
-  const hasChanges = usernameChanged || avatarFile !== null;
+  const phoneChanged = phone.trim() !== currentUser.phone;
+  const hasChanges = usernameChanged || phoneChanged || avatarFile !== null;
   const shownAvatar = previewUrl ?? currentUser.avatarUrl;
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>): void {
@@ -84,6 +91,7 @@ export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProp
       const updated = await updateProfile({
         username: usernameChanged ? trimmedUsername : undefined,
         avatarFile,
+        phone: phoneChanged ? phone.trim() : undefined,
       });
       onProfileUpdated(updated);
       setAvatarFile(null);
@@ -125,6 +133,20 @@ export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProp
                 autoComplete='username'
               />
 
+              <label htmlFor='profile-phone'>Contact phone number</label>
+              <input
+                id='profile-phone'
+                type='tel'
+                value={phone}
+                maxLength={40}
+                onChange={(e) => {
+                  setPhone(e.target.value);
+                  setSuccess(null);
+                }}
+                autoComplete='tel'
+                placeholder='e.g. +61 400 000 000'
+              />
+
               <label htmlFor='profile-avatar'>Profile picture</label>
               <input
                 id='profile-avatar'
@@ -146,10 +168,7 @@ export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProp
         </form>
       </section>
 
-      <section className='card' aria-labelledby='profile-contracts-heading'>
-        <h2 id='profile-contracts-heading'>Coaching contracts</h2>
-        <p className='muted'>Coming soon.</p>
-      </section>
+      <CoachingContract currentUsername={currentUser.username} />
 
       <FoundationalQuestionnaire currentUsername={currentUser.username} />
     </div>
