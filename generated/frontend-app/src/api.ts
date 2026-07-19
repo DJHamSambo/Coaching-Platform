@@ -145,6 +145,7 @@ export async function updateProfile(payload: {
   username?: string;
   avatarFile?: File | null;
   phone?: string;
+  email?: string;
 }): Promise<CurrentUser> {
   const form = new FormData();
   if (typeof payload.username === 'string') {
@@ -155,6 +156,9 @@ export async function updateProfile(payload: {
   }
   if (typeof payload.phone === 'string') {
     form.append('phone', payload.phone);
+  }
+  if (typeof payload.email === 'string') {
+    form.append('email', payload.email);
   }
   const me = await request<ApiMe>('/api/auth/profile/', {
     method: 'PATCH',
@@ -210,7 +214,14 @@ interface ApiContract {
   id: number;
   title: string;
   data: ContractData;
+  status: 'awaiting_coachee' | 'executed';
+  coachee_accepted_terms: boolean;
+  coach_username: string | null;
+  coachee: number | null;
+  coachee_name: string | null;
+  coachee_username: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 function toContract(item: ApiContract): ContractItem {
@@ -218,7 +229,14 @@ function toContract(item: ApiContract): ContractItem {
     id: String(item.id),
     title: item.title,
     data: item.data,
+    status: item.status,
+    coacheeAcceptedTerms: Boolean(item.coachee_accepted_terms),
+    coachUsername: item.coach_username ?? null,
+    coacheeId: item.coachee != null ? String(item.coachee) : null,
+    coacheeName: item.coachee_name ?? null,
+    coacheeUsername: item.coachee_username ?? null,
     createdAt: item.created_at,
+    updatedAt: item.updated_at,
   };
 }
 
@@ -232,12 +250,28 @@ export async function listContracts(): Promise<ContractItem[]> {
 export async function createContract(payload: {
   title: string;
   data: ContractData;
+  coacheeId: string;
 }): Promise<ContractItem> {
   const created = await request<ApiContract>('/api/contracts/', {
     method: 'POST',
-    body: JSON.stringify({ title: payload.title, data: payload.data }),
+    body: JSON.stringify({ title: payload.title, data: payload.data, coachee: Number(payload.coacheeId) }),
   });
   return toContract(created);
+}
+
+export async function updateContract(
+  id: string,
+  payload: { data: ContractData; coacheeAcceptedTerms?: boolean },
+): Promise<ContractItem> {
+  const body: Record<string, unknown> = { data: payload.data };
+  if (payload.coacheeAcceptedTerms !== undefined) {
+    body.coachee_accepted_terms = payload.coacheeAcceptedTerms;
+  }
+  const updated = await request<ApiContract>(`/api/contracts/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+  return toContract(updated);
 }
 
 export async function deleteContract(id: string): Promise<void> {
@@ -618,6 +652,8 @@ interface ApiCoachee {
   notes: string;
   user?: number | null;
   user_username?: string;
+  user_email?: string;
+  user_phone?: string;
   added_by?: number;
   added_by_username?: string;
 }
@@ -634,6 +670,8 @@ function toAdminCoachee(c: ApiCoachee): AdminCoachee {
     notes: c.notes,
     user: c.user ? String(c.user) : null,
     userUsername: c.user_username ?? '',
+    userEmail: c.user_email ?? '',
+    userPhone: c.user_phone ?? '',
     addedById: c.added_by ? String(c.added_by) : '',
     addedByUsername: c.added_by_username ?? '',
   };

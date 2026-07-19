@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { jsPDF } from 'jspdf';
-import { createContract, deleteContract, listContracts } from '../api';
-import type { ContractData, ContractItem } from '../types';
+import { createContract, deleteContract, listAdminCoachees, listContracts, updateContract } from '../api';
+import type { AdminCoachee, ContractData, ContractItem, CurrentUser } from '../types';
 import { SignaturePad } from './SignaturePad';
 
 interface CoachingContractProps {
-  currentUsername: string;
+  currentUser: CurrentUser;
 }
 
 interface TermsSection {
@@ -87,17 +87,38 @@ function formatDate(iso: string): string {
   });
 }
 
-export function CoachingContract({ currentUsername }: CoachingContractProps): JSX.Element {
+function statusLabel(item: ContractItem, currentUsername: string): string {
+  if (item.status === 'executed') return 'Fully executed';
+  if (item.coacheeUsername === currentUsername) return 'Awaiting your signature';
+  return 'Awaiting coachee\u2019s signature';
+}
+
+export function CoachingContract({ currentUser }: CoachingContractProps): JSX.Element {
+  const isCoachee = currentUser.role === 'coachee';
   const [items, setItems] = useState<ContractItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [coachees, setCoachees] = useState<AdminCoachee[]>([]);
+
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState<ContractData>(emptyContract);
+  const [selectedCoacheeId, setSelectedCoacheeId] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [viewing, setViewing] = useState<ContractItem | null>(null);
+
+  const [reviewing, setReviewing] = useState<ContractItem | null>(null);
+  const [reviewAddress, setReviewAddress] = useState('');
+  const [reviewPhone, setReviewPhone] = useState('');
+  const [reviewEmail, setReviewEmail] = useState('');
+  const [reviewDob, setReviewDob] = useState('');
+  const [reviewAccepted, setReviewAccepted] = useState(false);
+  const [reviewSignatureName, setReviewSignatureName] = useState('');
+  const [reviewSignature, setReviewSignature] = useState('');
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -120,11 +141,31 @@ export function CoachingContract({ currentUsername }: CoachingContractProps): JS
     };
   }, []);
 
+  useEffect(() => {
+    if (isCoachee) return;
+    let cancelled = false;
+    listAdminCoachees()
+      .then((data) => {
+        if (!cancelled) setCoachees(data.filter((c) => Boolean(c.user)));
+      })
+      .catch(() => {
+        /* silently ignore; the coachee dropdown will just be empty */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCoachee]);
+
+  const availableCoachees = useMemo(() => coachees, [coachees]);
+
   function openForm(): void {
     const fresh = emptyContract();
-    fresh.coach.name = currentUsername;
-    fresh.coachSignatureName = currentUsername;
+    fresh.coach.name = currentUser.username;
+    fresh.coach.phone = currentUser.phone;
+    fresh.coach.email = currentUser.email;
+    fresh.coachSignatureName = currentUser.username;
     setForm(fresh);
+    setSelectedCoacheeId('');
     setFormError(null);
     setFormOpen(true);
   }
@@ -137,29 +178,46 @@ export function CoachingContract({ currentUsername }: CoachingContractProps): JS
     setForm((prev) => ({ ...prev, coach: { ...prev.coach, ...patch } }));
   }
 
-  function updateCoachee(patch: Partial<ContractData['coachee']>): void {
-    setForm((prev) => ({ ...prev, coachee: { ...prev.coachee, ...patch } }));
+  function handleCoacheeSelect(id: string): void {
+    setSelectedCoacheeId(id);
+    const chosen = coachees.find((c) => c.id === id);
+    setForm((prev) => ({
+      ...prev,
+      coachee: {
+        ...prev.coachee,
+        name: chosen?.name ?? '',
+        phone: chosen?.userPhone ?? '',
+        email: chosen?.userEmail || chosen?.email || '',
+      },
+    }));
   }
 
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
     setFormError(null);
-    if (!form.coach.name.trim() && !form.coachee.name.trim()) {
-      setFormError('Please enter at least the coach or coachee name before saving.');
+    if (!form.coach.name.trim()) {
+      setFormError('Please enter your name before saving.');
+      return;
+    }
+    if (!selectedCoacheeId) {
+      setFormError('Please select a coachee for this contract.');
+      return;
+    }
+    if (!form.coachSignature) {
+      setFormError('Please sign the contract before saving.');
       return;
     }
     const now = new Date().toISOString();
     const data: ContractData = {
       ...form,
       coachSignedAt: form.coachSignature ? form.coachSignedAt || now : '',
-      coacheeSignedAt: form.coacheeSignature ? form.coacheeSignedAt || now : '',
     };
     setSaving(true);
     try {
       const title = form.coachee.name.trim()
         ? `Executive Coaching Contract \u2013 ${form.coachee.name.trim()}`
         : 'Executive Coaching Contract';
-      const created = await createContract({ title, data });
+      const created = await createContract({ title, data, coacheeId: selectedCoacheeId });
       setItems((prev) => [created, ...prev]);
       setFormOpen(false);
     } catch (err) {
@@ -180,13 +238,64 @@ export function CoachingContract({ currentUsername }: CoachingContractProps): JS
     }
   }
 
+  function openReview(item: ContractItem): void {
+    setReviewing(item);
+    setReviewAddress(item.data.coachee.address ?? '');
+    setReviewPhone(item.data.coachee.phone || currentUser.phone);
+    setReviewEmail(item.data.coachee.email || currentUser.email);
+    setReviewDob(item.data.coachee.dateOfBirth ?? '');
+    setReviewAccepted(item.coacheeAcceptedTerms);
+    setReviewSignatureName(item.data.coacheeSignatureName || currentUser.username);
+    setReviewSignature(item.data.coacheeSignature ?? '');
+    setReviewError(null);
+  }
+
+  async function handleReviewSubmit(event: React.FormEvent): Promise<void> {
+    event.preventDefault();
+    if (!reviewing) return;
+    setReviewError(null);
+    if (!reviewAccepted) {
+      setReviewError('Please accept the terms and conditions before signing.');
+      return;
+    }
+    if (!reviewSignature) {
+      setReviewError('Please sign the contract before submitting.');
+      return;
+    }
+    const updatedData: ContractData = {
+      ...reviewing.data,
+      coachee: {
+        ...reviewing.data.coachee,
+        address: reviewAddress,
+        phone: reviewPhone,
+        email: reviewEmail,
+        dateOfBirth: reviewDob,
+      },
+      coacheeSignatureName: reviewSignatureName,
+      coacheeSignature: reviewSignature,
+      coacheeSignedAt: new Date().toISOString(),
+    };
+    setReviewSaving(true);
+    try {
+      const updated = await updateContract(reviewing.id, { data: updatedData, coacheeAcceptedTerms: true });
+      setItems((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      setReviewing(null);
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : 'Could not submit your signature.');
+    } finally {
+      setReviewSaving(false);
+    }
+  }
+
   return (
     <section className='card' aria-labelledby='profile-contracts-heading'>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h2 id='profile-contracts-heading' style={{ margin: 0 }}>Coaching contracts</h2>
-        <button type='button' className='primary' style={{ marginTop: 0 }} onClick={openForm}>
-          New Contract
-        </button>
+        {!isCoachee && (
+          <button type='button' className='primary' style={{ marginTop: 0 }} onClick={openForm}>
+            New Contract
+          </button>
+        )}
       </div>
 
       {loading && <p className='muted'>Loading contracts...</p>}
@@ -198,20 +307,28 @@ export function CoachingContract({ currentUsername }: CoachingContractProps): JS
 
       {items.length > 0 && (
         <ul className='questionnaire-list'>
-          {items.map((item) => (
-            <li key={item.id}>
-              <div className='contract-list-row'>
-                <button type='button' className='questionnaire-list-item' onClick={() => setViewing(item)}>
-                  <span className='questionnaire-list-name'>{item.title || 'Executive Coaching Contract'}</span>
-                  <span className='muted'>{formatDate(item.createdAt)}</span>
-                </button>
-                <div className='contract-list-actions'>
-                  <button type='button' onClick={() => downloadContractPdf(item)}>Download PDF</button>
-                  <button type='button' onClick={() => { void handleDelete(item); }}>Delete</button>
+          {items.map((item) => {
+            const awaitingMe = isCoachee && item.status === 'awaiting_coachee' && item.coacheeUsername === currentUser.username;
+            return (
+              <li key={item.id}>
+                <div className='contract-list-row'>
+                  <button type='button' className='questionnaire-list-item' onClick={() => setViewing(item)}>
+                    <span className='questionnaire-list-name'>{item.title || 'Executive Coaching Contract'}</span>
+                    <span className='muted'>{formatDate(item.createdAt)} {'\u00b7'} {statusLabel(item, currentUser.username)}</span>
+                  </button>
+                  <div className='contract-list-actions'>
+                    {awaitingMe && (
+                      <button type='button' className='primary' onClick={() => openReview(item)}>Review &amp; sign</button>
+                    )}
+                    <button type='button' onClick={() => downloadContractPdf(item)}>Download PDF</button>
+                    {!isCoachee && (
+                      <button type='button' onClick={() => { void handleDelete(item); }}>Delete</button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -228,7 +345,7 @@ export function CoachingContract({ currentUsername }: CoachingContractProps): JS
             </button>
             <h3>Executive Coaching Contract <span className='muted'>(Non-sponsored)</span></h3>
             <form onSubmit={(e) => { void handleSubmit(e); }}>
-              <p className='muted'>This Executive Coaching contract refers to the following parties.</p>
+              <p className='muted'>This Executive Coaching contract refers to the following parties. Once you sign and save, your coachee will be notified to review, accept the terms, and co-sign.</p>
 
               <label htmlFor='contract-date'>Agreement date</label>
               <input
@@ -239,7 +356,7 @@ export function CoachingContract({ currentUsername }: CoachingContractProps): JS
               />
 
               <fieldset className='contract-fieldset'>
-                <legend>Coach</legend>
+                <legend>Coach (you)</legend>
                 <label htmlFor='coach-name'>Name</label>
                 <input id='coach-name' type='text' value={form.coach.name}
                   onChange={(e) => updateCoach({ name: e.target.value })} />
@@ -256,21 +373,25 @@ export function CoachingContract({ currentUsername }: CoachingContractProps): JS
 
               <fieldset className='contract-fieldset'>
                 <legend>Coachee</legend>
-                <label htmlFor='coachee-name'>Name</label>
-                <input id='coachee-name' type='text' value={form.coachee.name}
-                  onChange={(e) => updateCoachee({ name: e.target.value })} />
-                <label htmlFor='coachee-address'>Address</label>
-                <input id='coachee-address' type='text' value={form.coachee.address}
-                  onChange={(e) => updateCoachee({ address: e.target.value })} />
-                <label htmlFor='coachee-phone'>Contact phone number</label>
-                <input id='coachee-phone' type='tel' value={form.coachee.phone}
-                  onChange={(e) => updateCoachee({ phone: e.target.value })} />
-                <label htmlFor='coachee-email'>Email address</label>
-                <input id='coachee-email' type='email' value={form.coachee.email}
-                  onChange={(e) => updateCoachee({ email: e.target.value })} />
-                <label htmlFor='coachee-dob'>Date of birth</label>
-                <input id='coachee-dob' type='date' value={form.coachee.dateOfBirth}
-                  onChange={(e) => updateCoachee({ dateOfBirth: e.target.value })} />
+                <label htmlFor='contract-coachee'>Select coachee</label>
+                <select
+                  id='contract-coachee'
+                  value={selectedCoacheeId}
+                  onChange={(e) => handleCoacheeSelect(e.target.value)}
+                >
+                  <option value=''>Choose a coachee&hellip;</option>
+                  {availableCoachees.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                {availableCoachees.length === 0 && (
+                  <p className='muted'>No coachees with a linked login are available yet. Add a coachee and link their account first.</p>
+                )}
+                {selectedCoacheeId && (
+                  <p className='muted'>
+                    {form.coachee.email || 'No email on file'}{form.coachee.phone ? ` \u00b7 ${form.coachee.phone}` : ''} &mdash; they will fill in their address and date of birth when they review and sign.
+                  </p>
+                )}
               </fieldset>
 
               <fieldset className='contract-fieldset'>
@@ -307,22 +428,14 @@ export function CoachingContract({ currentUsername }: CoachingContractProps): JS
               </details>
 
               <fieldset className='contract-fieldset'>
-                <legend>Signatures</legend>
-                <label htmlFor='coach-sign-name'>Coach&rsquo;s name</label>
+                <legend>Your signature</legend>
+                <label htmlFor='coach-sign-name'>Your name</label>
                 <input id='coach-sign-name' type='text' value={form.coachSignatureName}
                   onChange={(e) => updateForm({ coachSignatureName: e.target.value })} />
                 <SignaturePad
-                  label="Coach's signature"
+                  label="Your signature"
                   value={form.coachSignature}
                   onChange={(dataUrl) => updateForm({ coachSignature: dataUrl, coachSignedAt: dataUrl ? new Date().toISOString() : '' })}
-                />
-                <label htmlFor='coachee-sign-name'>Coachee&rsquo;s name</label>
-                <input id='coachee-sign-name' type='text' value={form.coacheeSignatureName}
-                  onChange={(e) => updateForm({ coacheeSignatureName: e.target.value })} />
-                <SignaturePad
-                  label="Coachee's signature"
-                  value={form.coacheeSignature}
-                  onChange={(dataUrl) => updateForm({ coacheeSignature: dataUrl, coacheeSignedAt: dataUrl ? new Date().toISOString() : '' })}
                 />
               </fieldset>
 
@@ -330,9 +443,80 @@ export function CoachingContract({ currentUsername }: CoachingContractProps): JS
 
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                 <button type='submit' className='primary' style={{ marginTop: 0 }} disabled={saving}>
-                  {saving ? 'Saving...' : 'Save contract'}
+                  {saving ? 'Saving...' : 'Sign & send to coachee'}
                 </button>
                 <button type='button' onClick={() => setFormOpen(false)} disabled={saving}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {reviewing && (
+        <div className='admin-panel-modal-overlay'>
+          <div className='admin-panel-modal-card contract-modal-card'>
+            <button
+              type='button'
+              aria-label='Close review form'
+              onClick={() => setReviewing(null)}
+              className='admin-panel-modal-close'
+            >
+              x
+            </button>
+            <h3>Review &amp; sign your coaching contract</h3>
+            <p className='muted'>
+              {reviewing.coachUsername ?? 'Your coach'} has sent you this coaching contract. Please review the details below, fill in your information, accept the terms and conditions, and co-sign to fully execute the contract.
+            </p>
+
+            <ContractView contract={reviewing} />
+
+            <form onSubmit={(e) => { void handleReviewSubmit(e); }}>
+              <fieldset className='contract-fieldset'>
+                <legend>Your details</legend>
+                <label htmlFor='review-address'>Address</label>
+                <input id='review-address' type='text' value={reviewAddress}
+                  onChange={(e) => setReviewAddress(e.target.value)} />
+                <label htmlFor='review-phone'>Contact phone number</label>
+                <input id='review-phone' type='tel' value={reviewPhone}
+                  onChange={(e) => setReviewPhone(e.target.value)} />
+                <label htmlFor='review-email'>Email address</label>
+                <input id='review-email' type='email' value={reviewEmail}
+                  onChange={(e) => setReviewEmail(e.target.value)} />
+                <label htmlFor='review-dob'>Date of birth</label>
+                <input id='review-dob' type='date' value={reviewDob}
+                  onChange={(e) => setReviewDob(e.target.value)} />
+              </fieldset>
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, margin: '12px 0' }}>
+                <input
+                  type='checkbox'
+                  checked={reviewAccepted}
+                  onChange={(e) => setReviewAccepted(e.target.checked)}
+                />
+                <span>I have read and accept the terms and conditions of this coaching contract.</span>
+              </label>
+
+              <fieldset className='contract-fieldset'>
+                <legend>Your signature</legend>
+                <label htmlFor='coachee-sign-name'>Your name</label>
+                <input id='coachee-sign-name' type='text' value={reviewSignatureName}
+                  onChange={(e) => setReviewSignatureName(e.target.value)} />
+                <SignaturePad
+                  label="Your signature"
+                  value={reviewSignature}
+                  onChange={(dataUrl) => setReviewSignature(dataUrl)}
+                />
+              </fieldset>
+
+              {reviewError && <p className='muted' role='alert' style={{ color: '#e5484d' }}>{reviewError}</p>}
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                <button type='submit' className='primary' style={{ marginTop: 0 }} disabled={reviewSaving}>
+                  {reviewSaving ? 'Submitting...' : 'Accept & co-sign'}
+                </button>
+                <button type='button' onClick={() => setReviewing(null)} disabled={reviewSaving}>
                   Cancel
                 </button>
               </div>
@@ -380,7 +564,10 @@ function ContractView({ contract }: { contract: ContractItem }): JSX.Element {
   return (
     <div>
       <h3>Executive Coaching Contract <span className='muted'>(Non-sponsored)</span></h3>
-      <p className='muted'>Saved {formatDate(contract.createdAt)}{d.agreementDate ? ` \u00b7 Dated ${d.agreementDate}` : ''}</p>
+      <p className='muted'>
+        Saved {formatDate(contract.createdAt)}{d.agreementDate ? ` \u00b7 Dated ${d.agreementDate}` : ''}
+        {' \u00b7 '}{contract.status === 'executed' ? 'Fully executed' : 'Awaiting coachee\u2019s signature'}
+      </p>
 
       <h4>Coach</h4>
       <dl className='contract-view'>

@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -144,6 +145,26 @@ def profile(request: Request) -> Response:
         if new_phone != profile_obj.phone:
             profile_obj.phone = new_phone
             profile_obj.save(update_fields=["phone"])
+
+    new_email = request.data.get("email")
+    if new_email is not None:
+        new_email = str(new_email).strip()
+        if new_email:
+            try:
+                validate_email(new_email)
+            except DjangoValidationError:
+                return Response(
+                    {"email": ["Enter a valid email address."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if User.objects.filter(email__iexact=new_email).exclude(pk=user.pk).exists():
+                return Response(
+                    {"email": ["That email address is already in use."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        if new_email != user.email:
+            user.email = new_email
+            user.save(update_fields=["email"])
 
     return Response(_me_payload(user, request))
 

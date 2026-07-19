@@ -44,11 +44,20 @@ export interface ContractData {
   coacheeSignedAt: string;
 }
 
+export type ContractStatus = 'awaiting_coachee' | 'executed';
+
 export interface ContractItem {
   id: string;
   title: string;
   data: ContractData;
+  status: ContractStatus;
+  coacheeAcceptedTerms: boolean;
+  coachUsername: string | null;
+  coacheeId: string | null;
+  coacheeName: string | null;
+  coacheeUsername: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface CurrentUser {
@@ -75,6 +84,8 @@ export interface AdminCoachee extends Coachee {
   addedByUsername: string;
   user?: string | null;
   userUsername?: string;
+  userEmail?: string;
+  userPhone?: string;
 }
 
 export interface CoachingPlan {
@@ -154,14 +165,14 @@ export interface ResourceItem {
   createdAt: string;
 }
 
-export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created' | 'plan_assigned' | 'resource_added';
+export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created' | 'plan_assigned' | 'resource_added' | 'contract_awaiting_signature' | 'contract_executed';
 
 export interface NotificationItem {
   id: string;
   actorName: string;
   type: NotificationType;
   message: string;
-  targetType: 'plan' | 'action' | 'session' | 'insight' | 'resource' | '';
+  targetType: 'plan' | 'action' | 'session' | 'insight' | 'resource' | 'contract' | '';
   targetId: string | null;
   planId: string | null;
   actionId: string | null;

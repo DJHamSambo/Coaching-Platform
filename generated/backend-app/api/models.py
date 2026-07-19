@@ -222,13 +222,15 @@ class Notification(models.Model):
         ("action_created", "Action Created"),
         ("plan_assigned", "Plan Assigned"),
         ("resource_added", "Resource Added"),
+        ("contract_awaiting_signature", "Contract Awaiting Signature"),
+        ("contract_executed", "Contract Executed"),
     ]
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
     actor_name = models.CharField(max_length=150, blank=True, default="", help_text="Display name of who triggered the notification")
     notification_type = models.CharField(max_length=32, choices=TYPE_CHOICES)
     message = models.CharField(max_length=500)
     # Navigation context — where clicking the notification should take the user
-    target_type = models.CharField(max_length=32, blank=True, default="", help_text="plan | action | session | insight")
+    target_type = models.CharField(max_length=32, blank=True, default="", help_text="plan | action | session | insight | contract")
     target_id = models.IntegerField(null=True, blank=True)
     plan_id = models.IntegerField(null=True, blank=True)
     action_id = models.IntegerField(null=True, blank=True)
@@ -304,22 +306,36 @@ class FoundationalQuestionnaire(models.Model):
 
 
 class CoachingContract(models.Model):
-    """A saved executive coaching contract created by a user.
+    """A saved executive coaching contract created by a coach and assigned to
+    a coachee for review, acceptance, and co-signature.
 
     All of the fillable fields (party details, session terms, signatures) are
     stored together in a self-describing ``data`` JSON object so that saved
     contracts remain intact even if the contract template changes later.
     """
 
-    owner = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name="contracts"
+    STATUS_AWAITING_COACHEE = "awaiting_coachee"
+    STATUS_EXECUTED = "executed"
+    STATUS_CHOICES = [
+        (STATUS_AWAITING_COACHEE, "Awaiting coachee signature"),
+        (STATUS_EXECUTED, "Fully executed"),
+    ]
+
+    coach = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="coach_contracts"
+    )
+    coachee = models.ForeignKey(
+        Coachee, on_delete=models.SET_NULL, null=True, blank=True, related_name="contracts"
     )
     title = models.CharField(max_length=255, blank=True, default="Executive Coaching Contract")
     data = models.JSONField(default=dict)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_AWAITING_COACHEE)
+    coachee_accepted_terms = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        return f"Contract<{self.owner.username}:{self.created_at:%Y-%m-%d}>"
+        return f"Contract<{self.coach.username}:{self.created_at:%Y-%m-%d}>"

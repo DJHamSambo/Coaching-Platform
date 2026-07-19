@@ -308,6 +308,10 @@ export default function App() {
       setActiveModule('insights');
       return;
     }
+    if (notification.targetType === 'contract') {
+      setActiveModule('profile');
+      return;
+    }
     setActiveModule('activity');
   }
 

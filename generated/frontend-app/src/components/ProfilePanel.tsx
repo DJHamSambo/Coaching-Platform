@@ -22,6 +22,7 @@ function initialsFor(name: string): string {
 export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProps): JSX.Element {
   const [username, setUsername] = useState(currentUser.username);
   const [phone, setPhone] = useState(currentUser.phone);
+  const [email, setEmail] = useState(currentUser.email);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -37,6 +38,10 @@ export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProp
     setPhone(currentUser.phone);
   }, [currentUser.phone]);
 
+  useEffect(() => {
+    setEmail(currentUser.email);
+  }, [currentUser.email]);
+
   // Build (and clean up) an object URL for the locally selected image preview.
   useEffect(() => {
     if (!avatarFile) {
@@ -51,7 +56,8 @@ export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProp
   const trimmedUsername = username.trim();
   const usernameChanged = trimmedUsername !== currentUser.username;
   const phoneChanged = phone.trim() !== currentUser.phone;
-  const hasChanges = usernameChanged || phoneChanged || avatarFile !== null;
+  const emailChanged = email.trim() !== currentUser.email;
+  const hasChanges = usernameChanged || phoneChanged || emailChanged || avatarFile !== null;
   const shownAvatar = previewUrl ?? currentUser.avatarUrl;
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>): void {
@@ -92,6 +98,7 @@ export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProp
         username: usernameChanged ? trimmedUsername : undefined,
         avatarFile,
         phone: phoneChanged ? phone.trim() : undefined,
+        email: emailChanged ? email.trim() : undefined,
       });
       onProfileUpdated(updated);
       setAvatarFile(null);
@@ -147,6 +154,20 @@ export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProp
                 placeholder='e.g. +61 400 000 000'
               />
 
+              <label htmlFor='profile-email'>Email address</label>
+              <input
+                id='profile-email'
+                type='email'
+                value={email}
+                maxLength={254}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setSuccess(null);
+                }}
+                autoComplete='email'
+                placeholder='e.g. you@example.com'
+              />
+
               <label htmlFor='profile-avatar'>Profile picture</label>
               <input
                 id='profile-avatar'
@@ -168,7 +189,7 @@ export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProp
         </form>
       </section>
 
-      <CoachingContract currentUsername={currentUser.username} />
+      <CoachingContract currentUser={currentUser} />
 
       <FoundationalQuestionnaire currentUsername={currentUser.username} />
     </div>

@@ -42,11 +42,28 @@ class CoachSerializer(serializers.ModelSerializer):
 class AdminCoacheeSerializer(serializers.ModelSerializer):
     added_by_username = serializers.CharField(source="added_by.username", read_only=True)
     user_username = serializers.CharField(source="user.username", read_only=True)
+    user_email = serializers.SerializerMethodField()
+    user_phone = serializers.SerializerMethodField()
 
     class Meta:
         model = Coachee
-        fields = ["id", "name", "email", "notes", "user", "user_username", "added_by", "added_by_username", "created_at"]
-        read_only_fields = ["id", "added_by", "added_by_username", "created_at", "user_username"]
+        fields = [
+            "id", "name", "email", "notes", "user", "user_username",
+            "user_email", "user_phone", "added_by", "added_by_username", "created_at",
+        ]
+        read_only_fields = [
+            "id", "added_by", "added_by_username", "created_at",
+            "user_username", "user_email", "user_phone",
+        ]
+
+    def get_user_email(self, obj) -> str:
+        return obj.user.email if obj.user_id else ""
+
+    def get_user_phone(self, obj) -> str:
+        if not obj.user_id:
+            return ""
+        profile = getattr(obj.user, "profile", None)
+        return profile.phone if profile else ""
 
     def create(self, validated_data):
         coachee = super().create(validated_data)
