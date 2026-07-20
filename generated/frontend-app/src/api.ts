@@ -23,6 +23,7 @@ import type {
   UnavailablePeriod,
   WeeklyAvailabilityWindow,
 } from './types';
+import { NOTIFICATION_TARGET_TYPES } from './types';
 import { GENERIC_API_ERROR_MESSAGE, SESSION_EXPIRED_MESSAGE } from './constants/messages';
 
 const BASE_URL = 'http://127.0.0.1:8000';
@@ -607,7 +608,7 @@ interface ApiNotification {
 }
 
 function toNotificationItem(n: ApiNotification): NotificationItem {
-  const targetType = (['plan', 'action', 'session', 'insight', 'resource', 'contract'].includes(n.target_type)
+  const targetType = ((NOTIFICATION_TARGET_TYPES as readonly string[]).includes(n.target_type)
     ? n.target_type
     : '') as NotificationItem['targetType'];
   return {
