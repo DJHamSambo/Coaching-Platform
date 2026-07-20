@@ -607,7 +607,7 @@ interface ApiNotification {
 }
 
 function toNotificationItem(n: ApiNotification): NotificationItem {
-  const targetType = (['plan', 'action', 'session', 'insight', 'resource'].includes(n.target_type)
+  const targetType = (['plan', 'action', 'session', 'insight', 'resource', 'contract'].includes(n.target_type)
     ? n.target_type
     : '') as NotificationItem['targetType'];
   return {

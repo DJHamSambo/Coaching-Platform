@@ -512,6 +512,17 @@ export function CoachingContract({ currentUser, focusContractId, onFocusHandled 
                   onChange={(e) => setReviewDob(e.target.value)} />
               </fieldset>
 
+              <details className='contract-terms-preview' open>
+                <summary>Terms &amp; conditions (review before accepting)</summary>
+                {TERMS.map((section) => (
+                  <div key={section.heading} className='contract-term'>
+                    <strong>{section.heading}</strong>
+                    <p className='muted'>{section.body}</p>
+                  </div>
+                ))}
+                <p className='muted'>{CLOSING_STATEMENT}</p>
+              </details>
+
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, margin: '12px 0' }}>
                 <input
                   type='checkbox'
