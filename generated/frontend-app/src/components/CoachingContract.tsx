@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import { createContract, deleteContract, listAdminCoachees, listContracts, updateContract } from '../api';
 import type { AdminCoachee, ContractData, ContractItem, CurrentUser } from '../types';
@@ -6,6 +6,8 @@ import { SignaturePad } from './SignaturePad';
 
 interface CoachingContractProps {
   currentUser: CurrentUser;
+  focusContractId?: string | null;
+  onFocusHandled?: () => void;
 }
 
 interface TermsSection {
@@ -93,7 +95,7 @@ function statusLabel(item: ContractItem, currentUsername: string): string {
   return 'Awaiting coachee\u2019s signature';
 }
 
-export function CoachingContract({ currentUser }: CoachingContractProps): JSX.Element {
+export function CoachingContract({ currentUser, focusContractId, onFocusHandled }: CoachingContractProps): JSX.Element {
   const isCoachee = currentUser.role === 'coachee';
   const [items, setItems] = useState<ContractItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -249,6 +251,27 @@ export function CoachingContract({ currentUser }: CoachingContractProps): JSX.El
     setReviewSignature(item.data.coacheeSignature ?? '');
     setReviewError(null);
   }
+
+  const handledFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusContractId) {
+      handledFocusRef.current = null;
+      return;
+    }
+    if (loading) return;
+    if (handledFocusRef.current === focusContractId) return;
+    const item = items.find((c) => c.id === focusContractId);
+    if (!item) return;
+    handledFocusRef.current = focusContractId;
+    const awaitingMe = isCoachee && item.status === 'awaiting_coachee' && item.coacheeUsername === currentUser.username;
+    if (awaitingMe) {
+      openReview(item);
+    } else {
+      setViewing(item);
+    }
+    onFocusHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusContractId, items, loading, isCoachee, currentUser.username, onFocusHandled]);
 
   async function handleReviewSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();

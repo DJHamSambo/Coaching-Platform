@@ -110,6 +110,7 @@ export default function App() {
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const [focusActionId, setFocusActionId] = useState<string | null>(null);
   const [focusResourceId, setFocusResourceId] = useState<string | null>(null);
+  const [focusContractId, setFocusContractId] = useState<string | null>(null);
 
   const unreadCount = useMemo(() => notifications.filter((item) => !item.isRead).length, [notifications]);
 
@@ -309,6 +310,7 @@ export default function App() {
       return;
     }
     if (notification.targetType === 'contract') {
+      setFocusContractId(notification.targetId ?? null);
       setActiveModule('profile');
       return;
     }
@@ -566,7 +568,12 @@ export default function App() {
         {activeModule === 'administration' && <AdministrationPanel currentUser={currentUser} />}
 
         {activeModule === 'profile' && (
-          <ProfilePanel currentUser={currentUser} onProfileUpdated={setCurrentUser} />
+          <ProfilePanel
+            currentUser={currentUser}
+            onProfileUpdated={setCurrentUser}
+            focusContractId={focusContractId}
+            onFocusHandled={() => setFocusContractId(null)}
+          />
         )}
       </section>
     </main>

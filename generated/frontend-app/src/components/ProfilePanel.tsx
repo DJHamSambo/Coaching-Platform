@@ -7,6 +7,8 @@ import { CoachingContract } from './CoachingContract';
 interface ProfilePanelProps {
   currentUser: CurrentUser;
   onProfileUpdated: (user: CurrentUser) => void;
+  focusContractId?: string | null;
+  onFocusHandled?: () => void;
 }
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -19,7 +21,7 @@ function initialsFor(name: string): string {
   return letters.toUpperCase();
 }
 
-export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProps): JSX.Element {
+export function ProfilePanel({ currentUser, onProfileUpdated, focusContractId, onFocusHandled }: ProfilePanelProps): JSX.Element {
   const [username, setUsername] = useState(currentUser.username);
   const [phone, setPhone] = useState(currentUser.phone);
   const [email, setEmail] = useState(currentUser.email);
@@ -189,7 +191,7 @@ export function ProfilePanel({ currentUser, onProfileUpdated }: ProfilePanelProp
         </form>
       </section>
 
-      <CoachingContract currentUser={currentUser} />
+      <CoachingContract currentUser={currentUser} focusContractId={focusContractId} onFocusHandled={onFocusHandled} />
 
       <FoundationalQuestionnaire currentUsername={currentUser.username} />
     </div>
