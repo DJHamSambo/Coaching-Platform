@@ -221,6 +221,10 @@ export function CoachingContract({ currentUser, focusContractId, onFocusHandled,
       setFormError('Please select a coachee for this contract.');
       return;
     }
+    if (coacheeFilter && !coacheeFilter.user) {
+      setFormError('This coachee does not have a linked login yet. Link their account before sending a contract for signature.');
+      return;
+    }
     if (!form.coachSignature) {
       setFormError('Please sign the contract before saving.');
       return;
@@ -330,7 +334,7 @@ export function CoachingContract({ currentUser, focusContractId, onFocusHandled,
     <section className='card' aria-labelledby='profile-contracts-heading'>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h2 id='profile-contracts-heading' style={{ margin: 0 }}>Coaching contracts</h2>
-        {!isCoachee && (!coacheeFilter || Boolean(coacheeFilter.user)) && (
+        {!isCoachee && (
           <button type='button' className='primary' style={{ marginTop: 0 }} onClick={openForm}>
             New Contract
           </button>
@@ -338,7 +342,7 @@ export function CoachingContract({ currentUser, focusContractId, onFocusHandled,
       </div>
 
       {!isCoachee && coacheeFilter && !coacheeFilter.user && (
-        <p className='muted'>This coachee does not have a linked login yet, so a contract cannot be sent to them for signature.</p>
+        <p className='muted'>This coachee does not have a linked login yet. You can start a contract, but it can&apos;t be sent for signature until their account is linked.</p>
       )}
 
       {loading && <p className='muted'>Loading contracts...</p>}
