@@ -191,9 +191,12 @@ export function ProfilePanel({ currentUser, onProfileUpdated, focusContractId, o
         </form>
       </section>
 
-      <CoachingContract currentUser={currentUser} focusContractId={focusContractId} onFocusHandled={onFocusHandled} />
-
-      <FoundationalQuestionnaire currentUsername={currentUser.username} />
+      {currentUser.role === 'coachee' && (
+        <>
+          <CoachingContract currentUser={currentUser} focusContractId={focusContractId} onFocusHandled={onFocusHandled} />
+          <FoundationalQuestionnaire currentUsername={currentUser.username} />
+        </>
+      )}
     </div>
   );
 }

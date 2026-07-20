@@ -193,9 +193,10 @@ function toQuestionnaire(item: ApiQuestionnaire): QuestionnaireItem {
   };
 }
 
-export async function listQuestionnaires(): Promise<QuestionnaireItem[]> {
+export async function listQuestionnaires(coacheeId?: string): Promise<QuestionnaireItem[]> {
+  const query = coacheeId ? `?coachee=${encodeURIComponent(coacheeId)}` : '';
   const payload = await request<ApiQuestionnaire[] | ApiListResponse<ApiQuestionnaire>>(
-    '/api/questionnaires/',
+    `/api/questionnaires/${query}`,
   );
   return toListResults(payload).map(toQuestionnaire);
 }

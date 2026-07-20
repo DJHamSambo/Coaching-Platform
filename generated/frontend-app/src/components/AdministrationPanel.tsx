@@ -10,10 +10,16 @@ import {
   updateAdminCoach,
 } from '../api';
 import { isValidInputEmail, sanitizeInput, sanitizeInputEmail } from './adminFormUtils';
+import { CoacheeDetailPanel } from './CoacheeDetailPanel';
 import type { AdminCoachee, AdminCoach, CurrentUser } from '../types';
 
 interface AdministrationPanelProps {
   currentUser: CurrentUser;
+  /** Coachee id to auto-open (e.g. deep-linked from a contract notification). */
+  focusCoacheeId?: string | null;
+  /** Contract id to auto-open within the focused coachee's detail view. */
+  focusContractId?: string | null;
+  onFocusHandled?: () => void;
 }
 
 interface CoachFormState {
@@ -40,7 +46,7 @@ const EMPTY_COACHEE_FORM: CoacheeFormState = {
   notes: '',
 };
 
-export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
+export function AdministrationPanel({ currentUser, focusCoacheeId, focusContractId, onFocusHandled }: AdministrationPanelProps) {
   const [coaches, setCoaches] = useState<AdminCoach[]>([]);
   const [coachees, setCoachees] = useState<AdminCoachee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +59,8 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
 
   const [editingCoach, setEditingCoach] = useState<AdminCoach | null>(null);
   const [editingCoachee, setEditingCoachee] = useState<AdminCoachee | null>(null);
+
+  const [selectedCoacheeId, setSelectedCoacheeId] = useState<string | null>(null);
 
   async function loadData() {
     setLoading(true);
@@ -74,6 +82,13 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
   useEffect(() => {
     void loadData();
   }, []);
+
+  // Deep-link into a specific coachee's detail view (e.g. from a contract notification).
+  useEffect(() => {
+    if (!focusCoacheeId || loading) return;
+    const match = coachees.find((c) => c.id === focusCoacheeId);
+    if (match) setSelectedCoacheeId(match.id);
+  }, [focusCoacheeId, loading, coachees]);
 
   async function handleCreateCoach(event: React.FormEvent) {
     event.preventDefault();
@@ -200,6 +215,23 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
     }
   }
 
+  const selectedCoachee = selectedCoacheeId ? coachees.find((c) => c.id === selectedCoacheeId) ?? null : null;
+
+  if (selectedCoachee) {
+    return (
+      <CoacheeDetailPanel
+        coachee={selectedCoachee}
+        currentUser={currentUser}
+        onBack={() => {
+          setSelectedCoacheeId(null);
+          onFocusHandled?.();
+        }}
+        focusContractId={focusContractId}
+        onFocusHandled={onFocusHandled}
+      />
+    );
+  }
+
   return (
     <div>
       <h2>Administration</h2>
@@ -249,11 +281,15 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
         <div style={{ display: 'grid', gap: 8 }}>
           {coachees.map((coachee) => (
             <div key={coachee.id} className='admin-panel-row'>
-              <div>
+              <button
+                type='button'
+                onClick={() => setSelectedCoacheeId(coachee.id)}
+                style={{ background: 'none', border: 'none', textAlign: 'left', padding: 0, cursor: 'pointer', flex: 1 }}
+              >
                 <strong>{coachee.name}</strong>
                 <p className='muted' style={{ margin: '4px 0' }}>{coachee.email || 'No email'}</p>
                 {currentUser.isAdmin && <p className='muted' style={{ margin: 0 }}>Added by: {coachee.addedByUsername || 'Unknown'}</p>}
-              </div>
+              </button>
               <div className='admin-panel-actions'>
                 <button type='button' onClick={() => setEditingCoachee(coachee)}>Edit</button>
                 <button type='button' onClick={() => void handleDeleteCoachee(coachee.id)}>Remove</button>

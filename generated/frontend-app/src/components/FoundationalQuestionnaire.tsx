@@ -4,6 +4,10 @@ import type { QuestionnaireItem } from '../types';
 
 interface FoundationalQuestionnaireProps {
   currentUsername: string;
+  /** When set, shows the foundational questionnaires submitted by this coachee
+   * (read-only \u2014 coaches/admins cannot take a questionnaire on someone else's
+   * behalf) instead of the signed-in user's own questionnaires. */
+  coacheeId?: string;
 }
 
 const QUESTIONS = [
@@ -29,7 +33,9 @@ function formatSubmitted(iso: string): string {
 
 export function FoundationalQuestionnaire({
   currentUsername,
+  coacheeId,
 }: FoundationalQuestionnaireProps): JSX.Element {
+  const readOnly = Boolean(coacheeId);
   const [items, setItems] = useState<QuestionnaireItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +51,7 @@ export function FoundationalQuestionnaire({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    listQuestionnaires()
+    listQuestionnaires(coacheeId)
       .then((data) => {
         if (!cancelled) {
           setItems(data);
@@ -61,7 +67,7 @@ export function FoundationalQuestionnaire({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [coacheeId]);
 
   function openForm(): void {
     setName(currentUsername);
@@ -99,16 +105,18 @@ export function FoundationalQuestionnaire({
     <section className='card' aria-labelledby='profile-questionnaires-heading'>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h2 id='profile-questionnaires-heading' style={{ margin: 0 }}>Foundational questionnaires</h2>
-        <button type='button' className='primary' style={{ marginTop: 0 }} onClick={openForm}>
-          Take Questionnaire
-        </button>
+        {!readOnly && (
+          <button type='button' className='primary' style={{ marginTop: 0 }} onClick={openForm}>
+            Take Questionnaire
+          </button>
+        )}
       </div>
 
       {loading && <p className='muted'>Loading questionnaires...</p>}
       {error && <p className='muted' role='alert'>{error}</p>}
 
       {!loading && !error && items.length === 0 && (
-        <p className='muted'>No questionnaires submitted yet.</p>
+        <p className='muted'>{readOnly ? 'This coachee has not submitted a foundational questionnaire yet.' : 'No questionnaires submitted yet.'}</p>
       )}
 
       {items.length > 0 && (

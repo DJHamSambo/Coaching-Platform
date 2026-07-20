@@ -8,6 +8,10 @@ interface CoachingContractProps {
   currentUser: CurrentUser;
   focusContractId?: string | null;
   onFocusHandled?: () => void;
+  /** When set, scopes this view to a single coachee (used from the coachee
+   * detail view under Administration) instead of showing every contract the
+   * signed-in coach has ever created. */
+  coacheeFilter?: AdminCoachee;
 }
 
 interface TermsSection {
@@ -95,7 +99,7 @@ function statusLabel(item: ContractItem, currentUsername: string): string {
   return 'Awaiting coachee\u2019s signature';
 }
 
-export function CoachingContract({ currentUser, focusContractId, onFocusHandled }: CoachingContractProps): JSX.Element {
+export function CoachingContract({ currentUser, focusContractId, onFocusHandled, coacheeFilter }: CoachingContractProps): JSX.Element {
   const isCoachee = currentUser.role === 'coachee';
   const [items, setItems] = useState<ContractItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,7 +148,7 @@ export function CoachingContract({ currentUser, focusContractId, onFocusHandled 
   }, []);
 
   useEffect(() => {
-    if (isCoachee) return;
+    if (isCoachee || coacheeFilter) return;
     let cancelled = false;
     listAdminCoachees()
       .then((data) => {
@@ -156,9 +160,14 @@ export function CoachingContract({ currentUser, focusContractId, onFocusHandled 
     return () => {
       cancelled = true;
     };
-  }, [isCoachee]);
+  }, [isCoachee, coacheeFilter]);
 
   const availableCoachees = useMemo(() => coachees, [coachees]);
+
+  const visibleItems = useMemo(
+    () => (coacheeFilter ? items.filter((item) => item.coacheeId === coacheeFilter.id) : items),
+    [items, coacheeFilter],
+  );
 
   function openForm(): void {
     const fresh = emptyContract();
@@ -166,8 +175,15 @@ export function CoachingContract({ currentUser, focusContractId, onFocusHandled 
     fresh.coach.phone = currentUser.phone;
     fresh.coach.email = currentUser.email;
     fresh.coachSignatureName = currentUser.username;
+    if (coacheeFilter) {
+      fresh.coachee.name = coacheeFilter.name;
+      fresh.coachee.phone = coacheeFilter.userPhone ?? '';
+      fresh.coachee.email = coacheeFilter.userEmail || coacheeFilter.email || '';
+      setSelectedCoacheeId(coacheeFilter.id);
+    } else {
+      setSelectedCoacheeId('');
+    }
     setForm(fresh);
-    setSelectedCoacheeId('');
     setFormError(null);
     setFormOpen(true);
   }
@@ -314,23 +330,27 @@ export function CoachingContract({ currentUser, focusContractId, onFocusHandled 
     <section className='card' aria-labelledby='profile-contracts-heading'>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h2 id='profile-contracts-heading' style={{ margin: 0 }}>Coaching contracts</h2>
-        {!isCoachee && (
+        {!isCoachee && (!coacheeFilter || Boolean(coacheeFilter.user)) && (
           <button type='button' className='primary' style={{ marginTop: 0 }} onClick={openForm}>
             New Contract
           </button>
         )}
       </div>
 
+      {!isCoachee && coacheeFilter && !coacheeFilter.user && (
+        <p className='muted'>This coachee does not have a linked login yet, so a contract cannot be sent to them for signature.</p>
+      )}
+
       {loading && <p className='muted'>Loading contracts...</p>}
       {error && <p className='muted' role='alert'>{error}</p>}
 
-      {!loading && !error && items.length === 0 && (
+      {!loading && !error && visibleItems.length === 0 && (
         <p className='muted'>No contracts saved yet.</p>
       )}
 
-      {items.length > 0 && (
+      {visibleItems.length > 0 && (
         <ul className='questionnaire-list'>
-          {items.map((item) => {
+          {visibleItems.map((item) => {
             const awaitingMe = isCoachee && item.status === 'awaiting_coachee' && item.coacheeUsername === currentUser.username;
             return (
               <li key={item.id}>
@@ -396,24 +416,33 @@ export function CoachingContract({ currentUser, focusContractId, onFocusHandled 
 
               <fieldset className='contract-fieldset'>
                 <legend>Coachee</legend>
-                <label htmlFor='contract-coachee'>Select coachee</label>
-                <select
-                  id='contract-coachee'
-                  value={selectedCoacheeId}
-                  onChange={(e) => handleCoacheeSelect(e.target.value)}
-                >
-                  <option value=''>Choose a coachee&hellip;</option>
-                  {availableCoachees.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-                {availableCoachees.length === 0 && (
-                  <p className='muted'>No coachees with a linked login are available yet. Add a coachee and link their account first.</p>
-                )}
-                {selectedCoacheeId && (
+                {coacheeFilter ? (
                   <p className='muted'>
-                    {form.coachee.email || 'No email on file'}{form.coachee.phone ? ` \u00b7 ${form.coachee.phone}` : ''} &mdash; they will fill in their address and date of birth when they review and sign.
+                    <strong>{coacheeFilter.name}</strong>
+                    {form.coachee.email ? ` \u00b7 ${form.coachee.email}` : ''}{form.coachee.phone ? ` \u00b7 ${form.coachee.phone}` : ''} &mdash; they will fill in their address and date of birth when they review and sign.
                   </p>
+                ) : (
+                  <>
+                    <label htmlFor='contract-coachee'>Select coachee</label>
+                    <select
+                      id='contract-coachee'
+                      value={selectedCoacheeId}
+                      onChange={(e) => handleCoacheeSelect(e.target.value)}
+                    >
+                      <option value=''>Choose a coachee&hellip;</option>
+                      {availableCoachees.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    {availableCoachees.length === 0 && (
+                      <p className='muted'>No coachees with a linked login are available yet. Add a coachee and link their account first.</p>
+                    )}
+                    {selectedCoacheeId && (
+                      <p className='muted'>
+                        {form.coachee.email || 'No email on file'}{form.coachee.phone ? ` \u00b7 ${form.coachee.phone}` : ''} &mdash; they will fill in their address and date of birth when they review and sign.
+                      </p>
+                    )}
+                  </>
                 )}
               </fieldset>
 

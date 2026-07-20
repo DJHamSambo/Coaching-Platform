@@ -19,6 +19,7 @@ import {
   getToken,
   listAdminCoachees,
   listCoachDirectory,
+  listContracts,
   listInsights,
   listNotifications,
   listPlans,
@@ -50,8 +51,8 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
     calendar: 'Schedule sessions and manage your availability with coachees.',
     resources: 'Upload and share documents, linking them to the coaching plans they support.',
     activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
-    administration: 'Manage coaches, coachees, and their account access.',
-    profile: 'Manage your coaching contracts, foundational questionnaires, and account details.',
+    administration: 'Manage coaches and coachees, including their coaching contracts and foundational questionnaires.',
+    profile: 'Manage your account details.',
   },
   admin: {
     plans: 'Oversee the coaching plans created across coaches and coachees.',
@@ -59,8 +60,8 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
     calendar: 'Oversee sessions and availability across coaches and coachees.',
     resources: 'Oversee documents shared across coaching plans on the platform.',
     activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
-    administration: 'Manage coaches, coachees, and their account access.',
-    profile: 'Manage your coaching contracts, foundational questionnaires, and account details.',
+    administration: 'Manage coaches and coachees, including their coaching contracts and foundational questionnaires.',
+    profile: 'Manage your account details.',
   },
   coachee: {
     plans: 'Follow the coaching plans your coach has created for you.',
@@ -111,6 +112,7 @@ export default function App() {
   const [focusActionId, setFocusActionId] = useState<string | null>(null);
   const [focusResourceId, setFocusResourceId] = useState<string | null>(null);
   const [focusContractId, setFocusContractId] = useState<string | null>(null);
+  const [focusCoacheeId, setFocusCoacheeId] = useState<string | null>(null);
 
   const unreadCount = useMemo(() => notifications.filter((item) => !item.isRead).length, [notifications]);
 
@@ -310,8 +312,26 @@ export default function App() {
       return;
     }
     if (notification.targetType === 'contract') {
-      setFocusContractId(notification.targetId ?? null);
-      setActiveModule('profile');
+      if (currentUser?.role === 'coachee') {
+        setFocusContractId(notification.targetId ?? null);
+        setActiveModule('profile');
+        return;
+      }
+      // Coaches/admins manage contracts under each coachee's detail view now,
+      // so look up which coachee this contract belongs to and deep-link there.
+      try {
+        const contracts = await listContracts();
+        const match = contracts.find((c) => c.id === notification.targetId);
+        if (match?.coacheeId) {
+          setFocusCoacheeId(match.coacheeId);
+          setFocusContractId(notification.targetId ?? null);
+          setActiveModule('administration');
+          return;
+        }
+      } catch {
+        /* fall through to the activity tab */
+      }
+      setActiveModule('activity');
       return;
     }
     setActiveModule('activity');
@@ -565,7 +585,17 @@ export default function App() {
           </>
         )}
 
-        {activeModule === 'administration' && <AdministrationPanel currentUser={currentUser} />}
+        {activeModule === 'administration' && (
+          <AdministrationPanel
+            currentUser={currentUser}
+            focusCoacheeId={focusCoacheeId}
+            focusContractId={focusContractId}
+            onFocusHandled={() => {
+              setFocusCoacheeId(null);
+              setFocusContractId(null);
+            }}
+          />
+        )}
 
         {activeModule === 'profile' && (
           <ProfilePanel
