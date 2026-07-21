@@ -9,6 +9,8 @@ interface ProfilePanelProps {
   onProfileUpdated: (user: CurrentUser) => void;
   focusContractId?: string | null;
   onFocusHandled?: () => void;
+  autoOpenQuestionnaire?: boolean;
+  onAutoOpenQuestionnaireHandled?: () => void;
 }
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -21,7 +23,14 @@ function initialsFor(name: string): string {
   return letters.toUpperCase();
 }
 
-export function ProfilePanel({ currentUser, onProfileUpdated, focusContractId, onFocusHandled }: ProfilePanelProps): JSX.Element {
+export function ProfilePanel({
+  currentUser,
+  onProfileUpdated,
+  focusContractId,
+  onFocusHandled,
+  autoOpenQuestionnaire,
+  onAutoOpenQuestionnaireHandled,
+}: ProfilePanelProps): JSX.Element {
   const [username, setUsername] = useState(currentUser.username);
   const [phone, setPhone] = useState(currentUser.phone);
   const [email, setEmail] = useState(currentUser.email);
@@ -194,7 +203,11 @@ export function ProfilePanel({ currentUser, onProfileUpdated, focusContractId, o
       {currentUser.role === 'coachee' && (
         <>
           <CoachingContract currentUser={currentUser} focusContractId={focusContractId} onFocusHandled={onFocusHandled} />
-          <FoundationalQuestionnaire currentUsername={currentUser.username} />
+          <FoundationalQuestionnaire
+            currentUsername={currentUser.username}
+            autoOpen={autoOpenQuestionnaire}
+            onAutoOpenHandled={onAutoOpenQuestionnaireHandled}
+          />
         </>
       )}
     </div>

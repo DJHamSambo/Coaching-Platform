@@ -775,10 +775,18 @@ export async function listAdminCoachees(): Promise<AdminCoachee[]> {
   return items.map(toAdminCoachee);
 }
 
-export async function createAdminCoachee(payload: { name: string; email?: string; notes?: string }): Promise<AdminCoachee> {
+export async function createAdminCoachee(payload: {
+  name: string;
+  email?: string;
+  notes?: string;
+  requestQuestionnaire?: boolean;
+}): Promise<AdminCoachee> {
+  const { requestQuestionnaire, ...rest } = payload;
+  const body: Record<string, unknown> = { ...rest };
+  if (requestQuestionnaire !== undefined) body.request_questionnaire = requestQuestionnaire;
   const created = await request<ApiCoachee>('/api/admin/coachees/', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   return toAdminCoachee(created);
 }

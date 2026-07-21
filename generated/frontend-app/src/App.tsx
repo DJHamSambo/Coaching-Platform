@@ -80,6 +80,13 @@ export default function App() {
   const [activationToken, setActivationToken] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get('token'),
   );
+  // Captures the welcome email's '?next=questionnaire' hint so we can take a
+  // coachee straight to their foundational questionnaire once they sign in.
+  const [activationNext] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get('next'),
+  );
+  const [postActivationAction, setPostActivationAction] = useState<'questionnaire' | null>(null);
+  const [autoOpenQuestionnaire, setAutoOpenQuestionnaire] = useState(false);
 
   const enabledModules = useMemo(() => 
     MODULES.filter((item) => {
@@ -395,7 +402,13 @@ export default function App() {
     try {
       const user = await getMe();
       setCurrentUser(user);
-      setActiveModule('plans');
+      if (postActivationAction === 'questionnaire' && user.role === 'coachee') {
+        setActiveModule('profile');
+        setAutoOpenQuestionnaire(true);
+        setPostActivationAction(null);
+      } else {
+        setActiveModule('plans');
+      }
     } catch {
       setCurrentUser(null);
     }
@@ -413,6 +426,9 @@ export default function App() {
   function handleActivationDone(): void {
     // Remove the token from the URL and drop back to the sign-in screen.
     window.history.replaceState({}, document.title, '/');
+    if (activationNext === 'questionnaire') {
+      setPostActivationAction('questionnaire');
+    }
     setActivationToken(null);
   }
 
@@ -603,6 +619,8 @@ export default function App() {
             onProfileUpdated={setCurrentUser}
             focusContractId={focusContractId}
             onFocusHandled={() => setFocusContractId(null)}
+            autoOpenQuestionnaire={autoOpenQuestionnaire}
+            onAutoOpenQuestionnaireHandled={() => setAutoOpenQuestionnaire(false)}
           />
         )}
       </section>

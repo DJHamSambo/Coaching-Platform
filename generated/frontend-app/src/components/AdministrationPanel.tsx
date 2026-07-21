@@ -32,6 +32,7 @@ interface CoacheeFormState {
   name: string;
   email: string;
   notes: string;
+  requestQuestionnaire: boolean;
 }
 
 const EMPTY_COACH_FORM: CoachFormState = {
@@ -44,6 +45,7 @@ const EMPTY_COACHEE_FORM: CoacheeFormState = {
   name: '',
   email: '',
   notes: '',
+  requestQuestionnaire: true,
 };
 
 export function AdministrationPanel({ currentUser, focusCoacheeId, focusContractId, onFocusHandled }: AdministrationPanelProps) {
@@ -169,7 +171,12 @@ export function AdministrationPanel({ currentUser, focusCoacheeId, focusContract
     }
 
     try {
-      const created = await createAdminCoachee({ name, email, notes });
+      const created = await createAdminCoachee({
+        name,
+        email,
+        notes,
+        requestQuestionnaire: coacheeForm.requestQuestionnaire,
+      });
       setCoachees((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       setCoacheeForm(EMPTY_COACHEE_FORM);
       setAddingCoachee(false);
@@ -404,6 +411,17 @@ export function AdministrationPanel({ currentUser, focusCoacheeId, focusContract
                   value={coacheeForm.notes}
                   onChange={(event) => setCoacheeForm((prev) => ({ ...prev, notes: event.target.value }))}
                 />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                <input
+                  type='checkbox'
+                  checked={coacheeForm.requestQuestionnaire}
+                  onChange={(event) =>
+                    setCoacheeForm((prev) => ({ ...prev, requestQuestionnaire: event.target.checked }))
+                  }
+                  style={{ width: 'auto', marginTop: 0 }}
+                />
+                Request foundational questionnaire
               </label>
               <button type='submit' className='primary'>Create coachee</button>
             </form>

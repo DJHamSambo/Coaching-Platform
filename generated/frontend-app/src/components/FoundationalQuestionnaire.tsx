@@ -7,8 +7,11 @@ interface FoundationalQuestionnaireProps {
   /** When set, shows the foundational questionnaires submitted by this coachee
    * (read-only \u2014 coaches/admins cannot take a questionnaire on someone else's
    * behalf) instead of the signed-in user's own questionnaires. */
-  coacheeId?: string;
-}
+  coacheeId?: string;  /** When true, opens the "take questionnaire" form as soon as this mounts —
+   * used to deep-link a coachee straight to it after activating their account
+   * from their welcome email. */
+  autoOpen?: boolean;
+  onAutoOpenHandled?: () => void;}
 
 const QUESTIONS = [
   'What would you like to be different as a result of Coaching?',
@@ -34,6 +37,8 @@ function formatSubmitted(iso: string): string {
 export function FoundationalQuestionnaire({
   currentUsername,
   coacheeId,
+  autoOpen,
+  onAutoOpenHandled,
 }: FoundationalQuestionnaireProps): JSX.Element {
   const readOnly = Boolean(coacheeId);
   const [items, setItems] = useState<QuestionnaireItem[]>([]);
@@ -75,6 +80,15 @@ export function FoundationalQuestionnaire({
     setFormError(null);
     setFormOpen(true);
   }
+
+  useEffect(() => {
+    if (autoOpen && !readOnly) {
+      openForm();
+      onAutoOpenHandled?.();
+    }
+    // Only run when the deep-link request arrives; openForm/onAutoOpenHandled are stable enough for this one-shot effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen]);
 
   async function handleSubmit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
