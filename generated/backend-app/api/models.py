@@ -224,13 +224,15 @@ class Notification(models.Model):
         ("resource_added", "Resource Added"),
         ("contract_awaiting_signature", "Contract Awaiting Signature"),
         ("contract_executed", "Contract Executed"),
+        ("coachee_activated", "Coachee Activated"),
+        ("questionnaire_completed", "Foundational Questionnaire Completed"),
     ]
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
     actor_name = models.CharField(max_length=150, blank=True, default="", help_text="Display name of who triggered the notification")
     notification_type = models.CharField(max_length=32, choices=TYPE_CHOICES)
     message = models.CharField(max_length=500)
     # Navigation context — where clicking the notification should take the user
-    target_type = models.CharField(max_length=32, blank=True, default="", help_text="plan | action | session | insight | contract")
+    target_type = models.CharField(max_length=32, blank=True, default="", help_text="plan | action | session | insight | contract | coachee")
     target_id = models.IntegerField(null=True, blank=True)
     plan_id = models.IntegerField(null=True, blank=True)
     action_id = models.IntegerField(null=True, blank=True)

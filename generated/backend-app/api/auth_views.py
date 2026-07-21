@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -14,6 +15,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 
 from api.account_provisioning import mark_must_reset_password
 from api.models import Coachee, UserProfile
+from api.notifications import notify
 
 
 class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -35,7 +37,31 @@ class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
             )
             if match is not None:
                 attrs[self.username_field] = match.username
-        return super().validate(attrs)
+        data = super().validate(attrs)
+        self._notify_coach_on_first_login(self.user)
+        return data
+
+    @staticmethod
+    def _notify_coach_on_first_login(user: User) -> None:
+        """Tell the coach who added this coachee once they verify their email
+        and successfully sign in for the very first time."""
+        if user.last_login is not None:
+            return
+        user.last_login = timezone.now()
+        user.save(update_fields=["last_login"])
+
+        coachee = Coachee.objects.filter(user=user).select_related("added_by").first()
+        if coachee is None or coachee.added_by is None:
+            return
+        notify(
+            coachee.added_by,
+            coachee.name,
+            "coachee_activated",
+            f"{coachee.name} verified their email and signed in for the first time.",
+            target_type="coachee",
+            target_id=coachee.id,
+        )
+
 
 
 class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):

@@ -341,6 +341,13 @@ export default function App() {
       setActiveModule('activity');
       return;
     }
+    if (notification.targetType === 'coachee') {
+      // "Coachee activated" / "questionnaire completed" notifications — take
+      // the coach straight to that coachee's detail view under Administration.
+      setFocusCoacheeId(notification.targetId ?? null);
+      setActiveModule('administration');
+      return;
+    }
     setActiveModule('activity');
   }
 

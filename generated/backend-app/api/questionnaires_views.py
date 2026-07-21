@@ -2,6 +2,7 @@ from rest_framework import generics, permissions
 from rest_framework.exceptions import PermissionDenied
 
 from api.models import Coachee, FoundationalQuestionnaire
+from api.notifications import notify
 from api.questionnaires_serializers import FoundationalQuestionnaireSerializer
 
 
@@ -32,7 +33,17 @@ class QuestionnairesListView(generics.ListCreateAPIView):
         return FoundationalQuestionnaire.objects.filter(owner=user)
 
     def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+        questionnaire = serializer.save(owner=self.request.user)
+        coachee = Coachee.objects.filter(user=self.request.user).select_related("added_by").first()
+        if coachee is not None and coachee.added_by is not None:
+            notify(
+                coachee.added_by,
+                coachee.name,
+                "questionnaire_completed",
+                f"{coachee.name} completed their foundational questionnaire.",
+                target_type="coachee",
+                target_id=coachee.id,
+            )
 
 
 class QuestionnairesDetailView(generics.RetrieveDestroyAPIView):

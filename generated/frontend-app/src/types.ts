@@ -165,12 +165,12 @@ export interface ResourceItem {
   createdAt: string;
 }
 
-export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created' | 'plan_assigned' | 'resource_added' | 'contract_awaiting_signature' | 'contract_executed';
+export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created' | 'plan_assigned' | 'resource_added' | 'contract_awaiting_signature' | 'contract_executed' | 'coachee_activated' | 'questionnaire_completed';
 
 // Single source of truth for valid notification target types: the runtime array
 // drives the TS union below, so adding a new target type here automatically
 // updates NotificationItem['targetType'] everywhere (see api.ts toNotificationItem).
-export const NOTIFICATION_TARGET_TYPES = ['plan', 'action', 'session', 'insight', 'resource', 'contract'] as const;
+export const NOTIFICATION_TARGET_TYPES = ['plan', 'action', 'session', 'insight', 'resource', 'contract', 'coachee'] as const;
 export type NotificationTargetType = (typeof NOTIFICATION_TARGET_TYPES)[number] | '';
 
 export interface NotificationItem {
