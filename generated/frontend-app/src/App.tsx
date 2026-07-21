@@ -353,7 +353,7 @@ export default function App() {
     }
   }
 
-  async function handleCreatePlan(planData: Omit<CoachingPlan, 'id' | 'createdAt' | 'coacheeName'>): Promise<void> {
+  async function handleCreatePlan(planData: Omit<CoachingPlan, 'id' | 'createdAt' | 'coacheeName' | 'coachUsername'>): Promise<void> {
     try {
       const created = await createPlan(planData);
       setPlans((prev) => [...prev, created].sort((a, b) => a.targetDate.localeCompare(b.targetDate)));

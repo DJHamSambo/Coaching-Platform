@@ -5,7 +5,7 @@ interface PlanListProps {
   plans: CoachingPlan[];
   coachees: AdminCoachee[];
   onSelectPlan: (plan: CoachingPlan) => void;
-  onCreatePlan: (plan: Omit<CoachingPlan, 'id' | 'createdAt' | 'coacheeName'>) => void;
+  onCreatePlan: (plan: Omit<CoachingPlan, 'id' | 'createdAt' | 'coacheeName' | 'coachUsername'>) => void;
   canCreatePlan: boolean;
   loading: boolean;
   error: string | null;

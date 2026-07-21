@@ -11,7 +11,10 @@ const baseSession: CalendarSession = {
   durationMinutes: 60,
   coacheeId: '1',
   coacheeName: 'Jordan',
+  coachingPlanId: null,
+  coachingPlanTitle: null,
   notes: '',
+  requestedBy: 'coach',
 };
 
 const baseUnavailable: UnavailablePeriod = {
@@ -31,6 +34,7 @@ describe('CalendarViews', () => {
         calendarDays={[{ date: day, inCurrentMonth: true }]}
         sessionsByDate={new Map([[key, [baseSession]]])}
         unavailableByDate={new Map([[key, [baseUnavailable]]])}
+        availabilityByDate={new Map()}
         onCreateSession={vi.fn()}
         onEditSession={vi.fn()}
         onEditUnavailable={vi.fn()}
@@ -51,6 +55,7 @@ describe('CalendarViews', () => {
         weekHours={[10]}
         weekSessionsByHour={new Map([[`${dayKey}|10`, [baseSession]]])}
         weekUnavailableByHour={new Map([[`${dayKey}|10`, [baseUnavailable]]])}
+        weekAvailabilityByHour={new Map()}
         onCreateSession={vi.fn()}
         onEditSession={vi.fn()}
         onEditUnavailable={vi.fn()}
