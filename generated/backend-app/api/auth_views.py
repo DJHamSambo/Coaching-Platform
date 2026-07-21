@@ -17,6 +17,26 @@ from api.account_provisioning import mark_must_reset_password
 from api.models import Coachee, UserProfile
 from api.notifications import notify
 
+MAX_AVATAR_BYTES = 5 * 1024 * 1024  # 5 MB
+ALLOWED_AVATAR_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+ALLOWED_AVATAR_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+
+
+def _validate_avatar(avatar_file) -> str | None:
+    """Return an error message if the uploaded avatar is unsafe, else ``None``.
+
+    Rejects anything that isn't a recognised image type/extension and caps the
+    size, to guard against unrestricted file upload (arbitrary file types
+    served back from MEDIA_URL) and disk-exhaustion via oversized uploads.
+    """
+    if avatar_file.size > MAX_AVATAR_BYTES:
+        return "Avatar must be 5MB or smaller."
+    content_type = (avatar_file.content_type or "").lower()
+    name = (avatar_file.name or "").lower()
+    if content_type not in ALLOWED_AVATAR_CONTENT_TYPES or not name.endswith(ALLOWED_AVATAR_EXTENSIONS):
+        return "Avatar must be a JPEG, PNG, GIF, or WEBP image."
+    return None
+
 
 class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Allow signing in with either a username or an email address.
@@ -157,6 +177,9 @@ def profile(request: Request) -> Response:
 
     avatar_file = request.FILES.get("avatar")
     if avatar_file is not None:
+        error = _validate_avatar(avatar_file)
+        if error:
+            return Response({"avatar": [error]}, status=status.HTTP_400_BAD_REQUEST)
         profile_obj.avatar = avatar_file
         profile_obj.save(update_fields=["avatar"])
 
