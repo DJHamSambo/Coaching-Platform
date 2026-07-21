@@ -96,14 +96,27 @@ def create_activation_token(
     return raw_token
 
 
-def build_activation_link(raw_token: str) -> str:
-    """Build the SPA activation URL that carries the raw token."""
+def build_activation_link(raw_token: str, *, next_step: str | None = None) -> str:
+    """Build the SPA activation URL that carries the raw token.
+
+    ``next_step`` optionally names a step the SPA should take the user to right
+    after they sign in for the first time (e.g. ``"questionnaire"``).
+    """
     base = getattr(settings, "ACCOUNT_ACTIVATION_URL", "") or ""
-    return f"{base}?{urlencode({'token': raw_token})}"
+    params = {"token": raw_token}
+    if next_step:
+        params["next"] = next_step
+    return f"{base}?{urlencode(params)}"
 
 
-def send_activation_email(*, user: User, raw_token: str, role: str) -> None:
+def send_activation_email(
+    *, user: User, raw_token: str, role: str, request_questionnaire: bool = False
+) -> None:
     """Email a secure activation link so the user can verify and set a password.
+
+    When ``request_questionnaire`` is set for a coachee, the email also
+    explains that their coach has requested a foundational questionnaire and
+    links them straight to it once they've activated and signed in.
 
     No password is ever transmitted. Never raises — email failures are logged so
     they don't block account provisioning.
@@ -114,8 +127,9 @@ def send_activation_email(*, user: User, raw_token: str, role: str) -> None:
         return
 
     role_label = "coach" if role == "coach" else "coachee"
+    include_questionnaire = request_questionnaire and role == "coachee"
     greeting_name = (user.get_full_name() or user.username).strip()
-    activation_link = build_activation_link(raw_token)
+    activation_link = build_activation_link(raw_token, next_step="questionnaire" if include_questionnaire else None)
     ttl_hours = getattr(settings, "ACCOUNT_ACTIVATION_TOKEN_TTL_HOURS", 72)
 
     text_lines = [
@@ -128,6 +142,16 @@ def send_activation_email(*, user: User, raw_token: str, role: str) -> None:
         "",
         activation_link,
         "",
+    ]
+    if include_questionnaire:
+        text_lines += [
+            "Your coach has also requested that you complete a short foundational",
+            "questionnaire to help them prepare for your coaching sessions. Once you",
+            "activate your account and sign in using the link above, you'll be taken",
+            "straight to it \u2014 you can also find it any time under your Profile tab.",
+            "",
+        ]
+    text_lines += [
         f"This link is valid for {ttl_hours} hours and can only be used once.",
         "If you didn't expect this email, you can safely ignore it.",
         "",
@@ -137,6 +161,14 @@ def send_activation_email(*, user: User, raw_token: str, role: str) -> None:
 
     safe_name = escape(greeting_name)
     safe_link = escape(activation_link)
+    questionnaire_html = ""
+    if include_questionnaire:
+        questionnaire_html = """\
+  <p>Your coach has also requested that you complete a short <strong>foundational
+     questionnaire</strong> to help them prepare for your coaching sessions. Once you
+     activate your account and sign in, you'll be taken straight to it — you can
+     also find it any time under your Profile tab.</p>
+"""
     html_body = f"""\
 <div style="font-family:Segoe UI,Arial,sans-serif;color:#1f2933;line-height:1.5">
   <p>Hi {safe_name},</p>
@@ -151,6 +183,7 @@ def send_activation_email(*, user: User, raw_token: str, role: str) -> None:
       Verify email &amp; set password
     </a>
   </p>
+{questionnaire_html}\
   <p style="font-size:0.9em;color:#52606d">
     Or paste this link into your browser:<br>
     <a href="{safe_link}">{safe_link}</a>
@@ -190,8 +223,11 @@ def provision_coach_login(user: User) -> None:
     send_activation_email(user=user, raw_token=raw_token, role="coach")
 
 
-def provision_coachee_login(coachee: Coachee) -> User | None:
+def provision_coachee_login(coachee: Coachee, *, request_questionnaire: bool = True) -> User | None:
     """Create an inactive login account for a coachee and email an activation link.
+
+    When ``request_questionnaire`` is set, the activation email also explains
+    that a foundational questionnaire is expected and links straight to it.
 
     Returns the created ``User`` or ``None`` if no account was provisioned
     (e.g. the coachee already has one or has no email address).
@@ -219,5 +255,7 @@ def provision_coachee_login(coachee: Coachee) -> User | None:
 
     mark_email_verified(user, False)
     raw_token = create_activation_token(user)
-    send_activation_email(user=user, raw_token=raw_token, role="coachee")
+    send_activation_email(
+        user=user, raw_token=raw_token, role="coachee", request_questionnaire=request_questionnaire
+    )
     return user

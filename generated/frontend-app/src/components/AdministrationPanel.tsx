@@ -10,10 +10,16 @@ import {
   updateAdminCoach,
 } from '../api';
 import { isValidInputEmail, sanitizeInput, sanitizeInputEmail } from './adminFormUtils';
+import { CoacheeDetailPanel } from './CoacheeDetailPanel';
 import type { AdminCoachee, AdminCoach, CurrentUser } from '../types';
 
 interface AdministrationPanelProps {
   currentUser: CurrentUser;
+  /** Coachee id to auto-open (e.g. deep-linked from a contract notification). */
+  focusCoacheeId?: string | null;
+  /** Contract id to auto-open within the focused coachee's detail view. */
+  focusContractId?: string | null;
+  onFocusHandled?: () => void;
 }
 
 interface CoachFormState {
@@ -26,6 +32,7 @@ interface CoacheeFormState {
   name: string;
   email: string;
   notes: string;
+  requestQuestionnaire: boolean;
 }
 
 const EMPTY_COACH_FORM: CoachFormState = {
@@ -38,9 +45,10 @@ const EMPTY_COACHEE_FORM: CoacheeFormState = {
   name: '',
   email: '',
   notes: '',
+  requestQuestionnaire: true,
 };
 
-export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
+export function AdministrationPanel({ currentUser, focusCoacheeId, focusContractId, onFocusHandled }: AdministrationPanelProps) {
   const [coaches, setCoaches] = useState<AdminCoach[]>([]);
   const [coachees, setCoachees] = useState<AdminCoachee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,6 +61,8 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
 
   const [editingCoach, setEditingCoach] = useState<AdminCoach | null>(null);
   const [editingCoachee, setEditingCoachee] = useState<AdminCoachee | null>(null);
+
+  const [selectedCoacheeId, setSelectedCoacheeId] = useState<string | null>(null);
 
   async function loadData() {
     setLoading(true);
@@ -74,6 +84,13 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
   useEffect(() => {
     void loadData();
   }, []);
+
+  // Deep-link into a specific coachee's detail view (e.g. from a contract notification).
+  useEffect(() => {
+    if (!focusCoacheeId || loading) return;
+    const match = coachees.find((c) => c.id === focusCoacheeId);
+    if (match) setSelectedCoacheeId(match.id);
+  }, [focusCoacheeId, loading, coachees]);
 
   async function handleCreateCoach(event: React.FormEvent) {
     event.preventDefault();
@@ -154,7 +171,12 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
     }
 
     try {
-      const created = await createAdminCoachee({ name, email, notes });
+      const created = await createAdminCoachee({
+        name,
+        email,
+        notes,
+        requestQuestionnaire: coacheeForm.requestQuestionnaire,
+      });
       setCoachees((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       setCoacheeForm(EMPTY_COACHEE_FORM);
       setAddingCoachee(false);
@@ -198,6 +220,23 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
     } catch {
       setError('Could not delete coachee.');
     }
+  }
+
+  const selectedCoachee = selectedCoacheeId ? coachees.find((c) => c.id === selectedCoacheeId) ?? null : null;
+
+  if (selectedCoachee) {
+    return (
+      <CoacheeDetailPanel
+        coachee={selectedCoachee}
+        currentUser={currentUser}
+        onBack={() => {
+          setSelectedCoacheeId(null);
+          onFocusHandled?.();
+        }}
+        focusContractId={focusContractId}
+        onFocusHandled={onFocusHandled}
+      />
+    );
   }
 
   return (
@@ -249,11 +288,15 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
         <div style={{ display: 'grid', gap: 8 }}>
           {coachees.map((coachee) => (
             <div key={coachee.id} className='admin-panel-row'>
-              <div>
+              <button
+                type='button'
+                onClick={() => setSelectedCoacheeId(coachee.id)}
+                style={{ background: 'none', border: 'none', textAlign: 'left', padding: 0, cursor: 'pointer', flex: 1 }}
+              >
                 <strong>{coachee.name}</strong>
                 <p className='muted' style={{ margin: '4px 0' }}>{coachee.email || 'No email'}</p>
                 {currentUser.isAdmin && <p className='muted' style={{ margin: 0 }}>Added by: {coachee.addedByUsername || 'Unknown'}</p>}
-              </div>
+              </button>
               <div className='admin-panel-actions'>
                 <button type='button' onClick={() => setEditingCoachee(coachee)}>Edit</button>
                 <button type='button' onClick={() => void handleDeleteCoachee(coachee.id)}>Remove</button>
@@ -368,6 +411,17 @@ export function AdministrationPanel({ currentUser }: AdministrationPanelProps) {
                   value={coacheeForm.notes}
                   onChange={(event) => setCoacheeForm((prev) => ({ ...prev, notes: event.target.value }))}
                 />
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                <input
+                  type='checkbox'
+                  checked={coacheeForm.requestQuestionnaire}
+                  onChange={(event) =>
+                    setCoacheeForm((prev) => ({ ...prev, requestQuestionnaire: event.target.checked }))
+                  }
+                  style={{ width: 'auto', marginTop: 0 }}
+                />
+                Request foundational questionnaire
               </label>
               <button type='submit' className='primary'>Create coachee</button>
             </form>

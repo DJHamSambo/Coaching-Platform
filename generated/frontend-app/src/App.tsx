@@ -6,6 +6,7 @@ import { AdministrationPanel } from './components/AdministrationPanel';
 import { InsightsJournal } from './components/InsightsJournal';
 import { ResourceLibrary } from './components/ResourceLibrary';
 import { ActivityFeed } from './components/ActivityFeed';
+import { ProfilePanel } from './components/ProfilePanel';
 import { LoginScreen } from './components/LoginScreen';
 import { ForcePasswordReset } from './components/ForcePasswordReset';
 import { AccountActivation } from './components/AccountActivation';
@@ -18,6 +19,7 @@ import {
   getToken,
   listAdminCoachees,
   listCoachDirectory,
+  listContracts,
   listInsights,
   listNotifications,
   listPlans,
@@ -37,6 +39,7 @@ const MODULES = [
   { key: 'resources', label: 'Resources', enabled: true },
   { key: 'activity', label: 'Activity', enabled: true },
   { key: 'administration', label: 'Administration', enabled: true },
+  { key: 'profile', label: 'Profile', enabled: true },
 ] as const;
 
 type ModuleKey = (typeof MODULES)[number]['key'];
@@ -48,7 +51,8 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
     calendar: 'Schedule sessions and manage your availability with coachees.',
     resources: 'Upload and share documents, linking them to the coaching plans they support.',
     activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
-    administration: 'Manage coaches, coachees, and their account access.',
+    administration: 'Manage coaches and coachees, including their coaching contracts and foundational questionnaires.',
+    profile: 'Manage your account details.',
   },
   admin: {
     plans: 'Oversee the coaching plans created across coaches and coachees.',
@@ -56,7 +60,8 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
     calendar: 'Oversee sessions and availability across coaches and coachees.',
     resources: 'Oversee documents shared across coaching plans on the platform.',
     activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
-    administration: 'Manage coaches, coachees, and their account access.',
+    administration: 'Manage coaches and coachees, including their coaching contracts and foundational questionnaires.',
+    profile: 'Manage your account details.',
   },
   coachee: {
     plans: 'Follow the coaching plans your coach has created for you.',
@@ -65,6 +70,7 @@ const MODULE_SUBTITLES: Record<CurrentUser['role'], Record<ModuleKey, string>> =
     resources: 'Upload and share documents with your coach to support your plans.',
     activity: 'Stay on top of mentions, session bookings, and actions assigned to you.',
     administration: 'Manage your account access.',
+    profile: 'Manage your coaching contracts, foundational questionnaires, and account details.',
   },
 };
 
@@ -74,6 +80,13 @@ export default function App() {
   const [activationToken, setActivationToken] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get('token'),
   );
+  // Captures the welcome email's '?next=questionnaire' hint so we can take a
+  // coachee straight to their foundational questionnaire once they sign in.
+  const [activationNext] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get('next'),
+  );
+  const [postActivationAction, setPostActivationAction] = useState<'questionnaire' | null>(null);
+  const [autoOpenQuestionnaire, setAutoOpenQuestionnaire] = useState(false);
 
   const enabledModules = useMemo(() => 
     MODULES.filter((item) => {
@@ -105,6 +118,8 @@ export default function App() {
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const [focusActionId, setFocusActionId] = useState<string | null>(null);
   const [focusResourceId, setFocusResourceId] = useState<string | null>(null);
+  const [focusContractId, setFocusContractId] = useState<string | null>(null);
+  const [focusCoacheeId, setFocusCoacheeId] = useState<string | null>(null);
 
   const unreadCount = useMemo(() => notifications.filter((item) => !item.isRead).length, [notifications]);
 
@@ -303,6 +318,36 @@ export default function App() {
       setActiveModule('insights');
       return;
     }
+    if (notification.targetType === 'contract') {
+      if (currentUser?.role === 'coachee') {
+        setFocusContractId(notification.targetId ?? null);
+        setActiveModule('profile');
+        return;
+      }
+      // Coaches/admins manage contracts under each coachee's detail view now,
+      // so look up which coachee this contract belongs to and deep-link there.
+      try {
+        const contracts = await listContracts();
+        const match = contracts.find((c) => c.id === notification.targetId);
+        if (match?.coacheeId) {
+          setFocusCoacheeId(match.coacheeId);
+          setFocusContractId(notification.targetId ?? null);
+          setActiveModule('administration');
+          return;
+        }
+      } catch {
+        /* fall through to the activity tab */
+      }
+      setActiveModule('activity');
+      return;
+    }
+    if (notification.targetType === 'coachee') {
+      // "Coachee activated" / "questionnaire completed" notifications — take
+      // the coach straight to that coachee's detail view under Administration.
+      setFocusCoacheeId(notification.targetId ?? null);
+      setActiveModule('administration');
+      return;
+    }
     setActiveModule('activity');
   }
 
@@ -315,7 +360,7 @@ export default function App() {
     }
   }
 
-  async function handleCreatePlan(planData: Omit<CoachingPlan, 'id' | 'createdAt' | 'coacheeName'>): Promise<void> {
+  async function handleCreatePlan(planData: Omit<CoachingPlan, 'id' | 'createdAt' | 'coacheeName' | 'coachUsername'>): Promise<void> {
     try {
       const created = await createPlan(planData);
       setPlans((prev) => [...prev, created].sort((a, b) => a.targetDate.localeCompare(b.targetDate)));
@@ -364,7 +409,13 @@ export default function App() {
     try {
       const user = await getMe();
       setCurrentUser(user);
-      setActiveModule('plans');
+      if (postActivationAction === 'questionnaire' && user.role === 'coachee') {
+        setActiveModule('profile');
+        setAutoOpenQuestionnaire(true);
+        setPostActivationAction(null);
+      } else {
+        setActiveModule('plans');
+      }
     } catch {
       setCurrentUser(null);
     }
@@ -382,6 +433,9 @@ export default function App() {
   function handleActivationDone(): void {
     // Remove the token from the URL and drop back to the sign-in screen.
     window.history.replaceState({}, document.title, '/');
+    if (activationNext === 'questionnaire') {
+      setPostActivationAction('questionnaire');
+    }
     setActivationToken(null);
   }
 
@@ -419,9 +473,24 @@ export default function App() {
           <p className='subtitle'>{MODULE_SUBTITLES[currentUser.role][activeModule]}</p>
         </div>
         <div className='hero-account'>
-          <p className='muted'>
-            Signed in as {currentUser.username} ({currentUser.role})
-          </p>
+          <div className='hero-account-user'>
+            <button
+              type='button'
+              className='avatar avatar-sm avatar-button'
+              onClick={() => setActiveModule('profile')}
+              title='View profile'
+              aria-label='View profile'
+            >
+              {currentUser.avatarUrl ? (
+                <img src={currentUser.avatarUrl} alt='' />
+              ) : (
+                <span>{currentUser.username.trim().slice(0, 2).toUpperCase() || '?'}</span>
+              )}
+            </button>
+            <p className='muted'>
+              Signed in as {currentUser.username} ({currentUser.role})
+            </p>
+          </div>
           <button type='button' className='tab' onClick={handleLogout}>
             Sign out
           </button>
@@ -539,7 +608,28 @@ export default function App() {
           </>
         )}
 
-        {activeModule === 'administration' && <AdministrationPanel currentUser={currentUser} />}
+        {activeModule === 'administration' && (
+          <AdministrationPanel
+            currentUser={currentUser}
+            focusCoacheeId={focusCoacheeId}
+            focusContractId={focusContractId}
+            onFocusHandled={() => {
+              setFocusCoacheeId(null);
+              setFocusContractId(null);
+            }}
+          />
+        )}
+
+        {activeModule === 'profile' && (
+          <ProfilePanel
+            currentUser={currentUser}
+            onProfileUpdated={setCurrentUser}
+            focusContractId={focusContractId}
+            onFocusHandled={() => setFocusContractId(null)}
+            autoOpenQuestionnaire={autoOpenQuestionnaire}
+            onAutoOpenQuestionnaireHandled={() => setAutoOpenQuestionnaire(false)}
+          />
+        )}
       </section>
     </main>
   );

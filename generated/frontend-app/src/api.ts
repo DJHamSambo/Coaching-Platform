@@ -14,11 +14,16 @@ import type {
   PlanAction,
   PlanStatus,
   PlanTask,
+  QuestionnaireAnswer,
+  QuestionnaireItem,
+  ContractData,
+  ContractItem,
   ResourceItem,
   TaskStatus,
   UnavailablePeriod,
   WeeklyAvailabilityWindow,
 } from './types';
+import { NOTIFICATION_TARGET_TYPES } from './types';
 import { GENERIC_API_ERROR_MESSAGE, SESSION_EXPIRED_MESSAGE } from './constants/messages';
 
 const BASE_URL = 'http://127.0.0.1:8000';
@@ -108,6 +113,8 @@ interface ApiMe {
   is_admin: boolean;
   role: 'admin' | 'coach' | 'coachee';
   must_reset_password?: boolean;
+  avatar_url?: string | null;
+  phone?: string;
 }
 
 interface ApiListResponse<T> {
@@ -130,7 +137,147 @@ export async function getMe(): Promise<CurrentUser> {
     role: me.role,
     isAdmin: me.is_admin,
     mustResetPassword: Boolean(me.must_reset_password),
+    avatarUrl: me.avatar_url ?? null,
+    phone: me.phone ?? '',
   };
+}
+
+export async function updateProfile(payload: {
+  username?: string;
+  avatarFile?: File | null;
+  phone?: string;
+  email?: string;
+}): Promise<CurrentUser> {
+  const form = new FormData();
+  if (typeof payload.username === 'string') {
+    form.append('username', payload.username);
+  }
+  if (payload.avatarFile) {
+    form.append('avatar', payload.avatarFile);
+  }
+  if (typeof payload.phone === 'string') {
+    form.append('phone', payload.phone);
+  }
+  if (typeof payload.email === 'string') {
+    form.append('email', payload.email);
+  }
+  const me = await request<ApiMe>('/api/auth/profile/', {
+    method: 'PATCH',
+    body: form,
+  });
+  return {
+    id: String(me.id),
+    username: me.username,
+    email: me.email,
+    role: me.role,
+    isAdmin: me.is_admin,
+    mustResetPassword: Boolean(me.must_reset_password),
+    avatarUrl: me.avatar_url ?? null,
+    phone: me.phone ?? '',
+  };
+}
+
+interface ApiQuestionnaire {
+  id: number;
+  name: string;
+  answers: QuestionnaireAnswer[];
+  submitted_at: string;
+}
+
+function toQuestionnaire(item: ApiQuestionnaire): QuestionnaireItem {
+  return {
+    id: String(item.id),
+    name: item.name,
+    answers: Array.isArray(item.answers) ? item.answers : [],
+    submittedAt: item.submitted_at,
+  };
+}
+
+export async function listQuestionnaires(coacheeId?: string): Promise<QuestionnaireItem[]> {
+  const query = coacheeId ? `?coachee=${encodeURIComponent(coacheeId)}` : '';
+  const payload = await request<ApiQuestionnaire[] | ApiListResponse<ApiQuestionnaire>>(
+    `/api/questionnaires/${query}`,
+  );
+  return toListResults(payload).map(toQuestionnaire);
+}
+
+export async function createQuestionnaire(payload: {
+  name: string;
+  answers: QuestionnaireAnswer[];
+}): Promise<QuestionnaireItem> {
+  const created = await request<ApiQuestionnaire>('/api/questionnaires/', {
+    method: 'POST',
+    body: JSON.stringify({ name: payload.name, answers: payload.answers }),
+  });
+  return toQuestionnaire(created);
+}
+
+interface ApiContract {
+  id: number;
+  title: string;
+  data: ContractData;
+  status: 'awaiting_coachee' | 'executed';
+  coachee_accepted_terms: boolean;
+  coach_username: string | null;
+  coachee: number | null;
+  coachee_name: string | null;
+  coachee_username: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function toContract(item: ApiContract): ContractItem {
+  return {
+    id: String(item.id),
+    title: item.title,
+    data: item.data,
+    status: item.status,
+    coacheeAcceptedTerms: Boolean(item.coachee_accepted_terms),
+    coachUsername: item.coach_username ?? null,
+    coacheeId: item.coachee != null ? String(item.coachee) : null,
+    coacheeName: item.coachee_name ?? null,
+    coacheeUsername: item.coachee_username ?? null,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
+export async function listContracts(): Promise<ContractItem[]> {
+  const payload = await request<ApiContract[] | ApiListResponse<ApiContract>>(
+    '/api/contracts/',
+  );
+  return toListResults(payload).map(toContract);
+}
+
+export async function createContract(payload: {
+  title: string;
+  data: ContractData;
+  coacheeId: string;
+}): Promise<ContractItem> {
+  const created = await request<ApiContract>('/api/contracts/', {
+    method: 'POST',
+    body: JSON.stringify({ title: payload.title, data: payload.data, coachee: Number(payload.coacheeId) }),
+  });
+  return toContract(created);
+}
+
+export async function updateContract(
+  id: string,
+  payload: { data: ContractData; coacheeAcceptedTerms?: boolean },
+): Promise<ContractItem> {
+  const body: Record<string, unknown> = { data: payload.data };
+  if (payload.coacheeAcceptedTerms !== undefined) {
+    body.coachee_accepted_terms = payload.coacheeAcceptedTerms;
+  }
+  const updated = await request<ApiContract>(`/api/contracts/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+  return toContract(updated);
+}
+
+export async function deleteContract(id: string): Promise<void> {
+  await request<void>(`/api/contracts/${id}/`, { method: 'DELETE' });
 }
 
 export async function changePassword(payload: {
@@ -462,7 +609,7 @@ interface ApiNotification {
 }
 
 function toNotificationItem(n: ApiNotification): NotificationItem {
-  const targetType = (['plan', 'action', 'session', 'insight', 'resource'].includes(n.target_type)
+  const targetType = ((NOTIFICATION_TARGET_TYPES as readonly string[]).includes(n.target_type)
     ? n.target_type
     : '') as NotificationItem['targetType'];
   return {
@@ -507,6 +654,8 @@ interface ApiCoachee {
   notes: string;
   user?: number | null;
   user_username?: string;
+  user_email?: string;
+  user_phone?: string;
   added_by?: number;
   added_by_username?: string;
 }
@@ -523,6 +672,8 @@ function toAdminCoachee(c: ApiCoachee): AdminCoachee {
     notes: c.notes,
     user: c.user ? String(c.user) : null,
     userUsername: c.user_username ?? '',
+    userEmail: c.user_email ?? '',
+    userPhone: c.user_phone ?? '',
     addedById: c.added_by ? String(c.added_by) : '',
     addedByUsername: c.added_by_username ?? '',
   };
@@ -624,10 +775,18 @@ export async function listAdminCoachees(): Promise<AdminCoachee[]> {
   return items.map(toAdminCoachee);
 }
 
-export async function createAdminCoachee(payload: { name: string; email?: string; notes?: string }): Promise<AdminCoachee> {
+export async function createAdminCoachee(payload: {
+  name: string;
+  email?: string;
+  notes?: string;
+  requestQuestionnaire?: boolean;
+}): Promise<AdminCoachee> {
+  const { requestQuestionnaire, ...rest } = payload;
+  const body: Record<string, unknown> = { ...rest };
+  if (requestQuestionnaire !== undefined) body.request_questionnaire = requestQuestionnaire;
   const created = await request<ApiCoachee>('/api/admin/coachees/', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify(body),
   });
   return toAdminCoachee(created);
 }

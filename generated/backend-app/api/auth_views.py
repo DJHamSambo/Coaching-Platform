@@ -3,6 +3,8 @@ from __future__ import annotations
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -13,6 +15,27 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 
 from api.account_provisioning import mark_must_reset_password
 from api.models import Coachee, UserProfile
+from api.notifications import notify
+
+MAX_AVATAR_BYTES = 5 * 1024 * 1024  # 5 MB
+ALLOWED_AVATAR_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+ALLOWED_AVATAR_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+
+
+def _validate_avatar(avatar_file) -> str | None:
+    """Return an error message if the uploaded avatar is unsafe, else ``None``.
+
+    Rejects anything that isn't a recognised image type/extension and caps the
+    size, to guard against unrestricted file upload (arbitrary file types
+    served back from MEDIA_URL) and disk-exhaustion via oversized uploads.
+    """
+    if avatar_file.size > MAX_AVATAR_BYTES:
+        return "Avatar must be 5MB or smaller."
+    content_type = (avatar_file.content_type or "").lower()
+    name = (avatar_file.name or "").lower()
+    if content_type not in ALLOWED_AVATAR_CONTENT_TYPES or not name.endswith(ALLOWED_AVATAR_EXTENSIONS):
+        return "Avatar must be a JPEG, PNG, GIF, or WEBP image."
+    return None
 
 
 class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -34,7 +57,31 @@ class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
             )
             if match is not None:
                 attrs[self.username_field] = match.username
-        return super().validate(attrs)
+        data = super().validate(attrs)
+        self._notify_coach_on_first_login(self.user)
+        return data
+
+    @staticmethod
+    def _notify_coach_on_first_login(user: User) -> None:
+        """Tell the coach who added this coachee once they verify their email
+        and successfully sign in for the very first time."""
+        if user.last_login is not None:
+            return
+        user.last_login = timezone.now()
+        user.save(update_fields=["last_login"])
+
+        coachee = Coachee.objects.filter(user=user).select_related("added_by").first()
+        if coachee is None or coachee.added_by is None:
+            return
+        notify(
+            coachee.added_by,
+            coachee.name,
+            "coachee_activated",
+            f"{coachee.name} verified their email and signed in for the first time.",
+            target_type="coachee",
+            target_id=coachee.id,
+        )
+
 
 
 class EmailOrUsernameTokenObtainPairView(TokenObtainPairView):
@@ -57,10 +104,7 @@ def register(request: Request) -> Response:
     return Response({"id": user.pk, "username": user.username}, status=status.HTTP_201_CREATED)
 
 
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def me(request: Request) -> Response:
-    user = request.user
+def _me_payload(user, request: Request) -> dict:
     # Prefer FK link; only fall back to name for legacy coachees with no linked user account
     has_coachee_profile = (
         Coachee.objects.filter(user=user).exists()
@@ -68,15 +112,110 @@ def me(request: Request) -> Response:
     )
 
     role = "admin" if user.is_staff else ("coachee" if has_coachee_profile else "coach")
-    must_reset = UserProfile.objects.filter(user=user, must_reset_password=True).exists()
-    return Response({
+    profile = UserProfile.objects.filter(user=user).first()
+    must_reset = bool(profile and profile.must_reset_password)
+
+    avatar_url = None
+    if profile and profile.avatar:
+        url = profile.avatar.url
+        avatar_url = request.build_absolute_uri(url) if request else url
+
+    return {
         "id": user.pk,
         "username": user.username,
         "email": user.email,
         "is_admin": bool(user.is_staff),
         "role": role,
         "must_reset_password": must_reset,
-    })
+        "avatar_url": avatar_url,
+        "phone": profile.phone if profile else "",
+    }
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def me(request: Request) -> Response:
+    return Response(_me_payload(request.user, request))
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAuthenticated])
+def profile(request: Request) -> Response:
+    """View or update the signed-in user's editable profile fields.
+
+    Supports updating the username and uploading a profile picture. Send a
+    multipart/form-data request with an optional ``username`` field and/or an
+    ``avatar`` file. Returns the same payload as ``/api/auth/me/``.
+    """
+    user = request.user
+    if request.method == "GET":
+        return Response(_me_payload(user, request))
+
+    profile_obj, _ = UserProfile.objects.get_or_create(user=user)
+
+    new_username = request.data.get("username")
+    if new_username is not None:
+        new_username = str(new_username).strip()
+        if not new_username:
+            return Response(
+                {"username": ["Username cannot be empty."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(new_username) > 150:
+            return Response(
+                {"username": ["Username must be 150 characters or fewer."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if User.objects.filter(username__iexact=new_username).exclude(pk=user.pk).exists():
+            return Response(
+                {"username": ["That username is already taken."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if new_username != user.username:
+            user.username = new_username
+            user.save(update_fields=["username"])
+
+    avatar_file = request.FILES.get("avatar")
+    if avatar_file is not None:
+        error = _validate_avatar(avatar_file)
+        if error:
+            return Response({"avatar": [error]}, status=status.HTTP_400_BAD_REQUEST)
+        profile_obj.avatar = avatar_file
+        profile_obj.save(update_fields=["avatar"])
+
+    new_phone = request.data.get("phone")
+    if new_phone is not None:
+        new_phone = str(new_phone).strip()
+        if len(new_phone) > 40:
+            return Response(
+                {"phone": ["Phone number must be 40 characters or fewer."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if new_phone != profile_obj.phone:
+            profile_obj.phone = new_phone
+            profile_obj.save(update_fields=["phone"])
+
+    new_email = request.data.get("email")
+    if new_email is not None:
+        new_email = str(new_email).strip()
+        if new_email:
+            try:
+                validate_email(new_email)
+            except DjangoValidationError:
+                return Response(
+                    {"email": ["Enter a valid email address."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if User.objects.filter(email__iexact=new_email).exclude(pk=user.pk).exists():
+                return Response(
+                    {"email": ["That email address is already in use."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        if new_email != user.email:
+            user.email = new_email
+            user.save(update_fields=["email"])
+
+    return Response(_me_payload(user, request))
 
 
 @api_view(["POST"])

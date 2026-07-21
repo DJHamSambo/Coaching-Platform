@@ -8,6 +8,58 @@ export interface Coachee {
   notes: string;
 }
 
+export interface QuestionnaireAnswer {
+  question: string;
+  answer: string;
+}
+
+export interface QuestionnaireItem {
+  id: string;
+  name: string;
+  answers: QuestionnaireAnswer[];
+  submittedAt: string;
+}
+
+export interface ContractParty {
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+}
+
+export interface ContractData {
+  agreementDate: string;
+  coach: ContractParty;
+  coachee: ContractParty & { dateOfBirth: string };
+  periodSessions: string;
+  sessionCycle: string;
+  commencementDate: string;
+  totalFee: string;
+  paymentArrangement: 'advance' | 'instalments';
+  coachSignatureName: string;
+  coachSignature: string;
+  coachSignedAt: string;
+  coacheeSignatureName: string;
+  coacheeSignature: string;
+  coacheeSignedAt: string;
+}
+
+export type ContractStatus = 'awaiting_coachee' | 'executed';
+
+export interface ContractItem {
+  id: string;
+  title: string;
+  data: ContractData;
+  status: ContractStatus;
+  coacheeAcceptedTerms: boolean;
+  coachUsername: string | null;
+  coacheeId: string | null;
+  coacheeName: string | null;
+  coacheeUsername: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CurrentUser {
   id: string;
   username: string;
@@ -15,6 +67,8 @@ export interface CurrentUser {
   role: 'admin' | 'coach' | 'coachee';
   isAdmin: boolean;
   mustResetPassword: boolean;
+  avatarUrl: string | null;
+  phone: string;
 }
 
 export interface AdminCoach {
@@ -30,6 +84,8 @@ export interface AdminCoachee extends Coachee {
   addedByUsername: string;
   user?: string | null;
   userUsername?: string;
+  userEmail?: string;
+  userPhone?: string;
 }
 
 export interface CoachingPlan {
@@ -109,14 +165,20 @@ export interface ResourceItem {
   createdAt: string;
 }
 
-export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created' | 'plan_assigned' | 'resource_added';
+export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created' | 'plan_assigned' | 'resource_added' | 'contract_awaiting_signature' | 'contract_executed' | 'coachee_activated' | 'questionnaire_completed';
+
+// Single source of truth for valid notification target types: the runtime array
+// drives the TS union below, so adding a new target type here automatically
+// updates NotificationItem['targetType'] everywhere (see api.ts toNotificationItem).
+export const NOTIFICATION_TARGET_TYPES = ['plan', 'action', 'session', 'insight', 'resource', 'contract', 'coachee'] as const;
+export type NotificationTargetType = (typeof NOTIFICATION_TARGET_TYPES)[number] | '';
 
 export interface NotificationItem {
   id: string;
   actorName: string;
   type: NotificationType;
   message: string;
-  targetType: 'plan' | 'action' | 'session' | 'insight' | 'resource' | '';
+  targetType: NotificationTargetType;
   targetId: string | null;
   planId: string | null;
   actionId: string | null;

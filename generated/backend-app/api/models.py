@@ -16,6 +16,19 @@ class UserProfile(models.Model):
         default=False,
         help_text="True once the user has confirmed their email via an activation link.",
     )
+    avatar = models.FileField(
+        upload_to="avatars/",
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Optional profile picture shown in the app header.",
+    )
+    phone = models.CharField(
+        max_length=40,
+        blank=True,
+        default="",
+        help_text="Optional contact phone number shown on the account profile.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -209,13 +222,17 @@ class Notification(models.Model):
         ("action_created", "Action Created"),
         ("plan_assigned", "Plan Assigned"),
         ("resource_added", "Resource Added"),
+        ("contract_awaiting_signature", "Contract Awaiting Signature"),
+        ("contract_executed", "Contract Executed"),
+        ("coachee_activated", "Coachee Activated"),
+        ("questionnaire_completed", "Foundational Questionnaire Completed"),
     ]
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
     actor_name = models.CharField(max_length=150, blank=True, default="", help_text="Display name of who triggered the notification")
     notification_type = models.CharField(max_length=32, choices=TYPE_CHOICES)
     message = models.CharField(max_length=500)
     # Navigation context — where clicking the notification should take the user
-    target_type = models.CharField(max_length=32, blank=True, default="", help_text="plan | action | session | insight")
+    target_type = models.CharField(max_length=32, blank=True, default="", help_text="plan | action | session | insight | contract | coachee")
     target_id = models.IntegerField(null=True, blank=True)
     plan_id = models.IntegerField(null=True, blank=True)
     action_id = models.IntegerField(null=True, blank=True)
@@ -266,3 +283,61 @@ class Resource(models.Model):
 
     def __str__(self) -> str:
         return self.title
+
+
+class FoundationalQuestionnaire(models.Model):
+    """A completed foundational questionnaire submitted by a user.
+
+    The questions and answers are stored together as a self-describing list of
+    ``{"question": ..., "answer": ...}`` entries so historical submissions stay
+    intact even if the question set changes later.
+    """
+
+    owner = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="questionnaires"
+    )
+    name = models.CharField(max_length=255, blank=True, default="")
+    answers = models.JSONField(default=list)
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-submitted_at"]
+
+    def __str__(self) -> str:
+        return f"Questionnaire<{self.owner.username}:{self.submitted_at:%Y-%m-%d}>"
+
+
+class CoachingContract(models.Model):
+    """A saved executive coaching contract created by a coach and assigned to
+    a coachee for review, acceptance, and co-signature.
+
+    All of the fillable fields (party details, session terms, signatures) are
+    stored together in a self-describing ``data`` JSON object so that saved
+    contracts remain intact even if the contract template changes later.
+    """
+
+    STATUS_AWAITING_COACHEE = "awaiting_coachee"
+    STATUS_EXECUTED = "executed"
+    STATUS_CHOICES = [
+        (STATUS_AWAITING_COACHEE, "Awaiting coachee signature"),
+        (STATUS_EXECUTED, "Fully executed"),
+    ]
+
+    coach = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="coach_contracts"
+    )
+    coachee = models.ForeignKey(
+        Coachee, on_delete=models.SET_NULL, null=True, blank=True, related_name="contracts"
+    )
+    title = models.CharField(max_length=255, blank=True, default="Executive Coaching Contract")
+    data = models.JSONField(default=dict)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_AWAITING_COACHEE)
+    coachee_accepted_terms = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"Contract<{self.coach.username}:{self.created_at:%Y-%m-%d}>"
