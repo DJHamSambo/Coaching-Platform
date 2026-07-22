@@ -1,0 +1,9 @@
+jobs:
+  - job: CostGate
+    displayName: 'Fail the pipeline if projected spend exceeds budget'
+    pool: { vmImage: 'ubuntu-latest' }
+    steps:
+      - script: |
+          python agents/devops_agent.py plan --environment nonprod --fail-over-budget
+          python agents/devops_agent.py plan --environment prod --fail-over-budget
+        displayName: 'Evaluate cost estimate against configured budget caps'

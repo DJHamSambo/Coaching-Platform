@@ -1,0 +1,21 @@
+parameters:
+  - name: environment
+    type: string
+
+jobs:
+  - job: InfraPlan_${{ parameters.environment }}
+    displayName: 'What-if plan (${{ parameters.environment }})'
+    pool: { vmImage: 'ubuntu-latest' }
+    steps:
+      - task: AzureCLI@2
+        inputs:
+          azureSubscription: 'azure-service-connection'
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            az deployment group what-if \
+              --resource-group rg-coaching-platform-${{ parameters.environment }} \
+              --template-file infra/azure/main.bicep \
+              --parameters infra/azure/envs/${{ parameters.environment }}.bicepparam \
+              --parameters postgresAdminPassword="$(postgresAdminPassword)"
+        displayName: 'az deployment group what-if'

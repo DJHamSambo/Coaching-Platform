@@ -1,0 +1,13 @@
+jobs:
+  - job: BuildFrontend
+    displayName: 'Build & test frontend (Vite/React)'
+    pool: { vmImage: 'ubuntu-latest' }
+    steps:
+      - task: NodeTool@0
+        inputs: { versionSpec: '20.x' }
+      - script: |
+          cd generated/frontend-app
+          npm ci
+          npm run test
+          npm run build
+        displayName: 'Install, test, build'
