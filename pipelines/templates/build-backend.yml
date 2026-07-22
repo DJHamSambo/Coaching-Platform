@@ -1,0 +1,15 @@
+jobs:
+  - job: BuildBackend
+    displayName: 'Build & test backend (Django)'
+    pool: { vmImage: 'ubuntu-latest' }
+    steps:
+      - task: UsePythonVersion@0
+        inputs: { versionSpec: '3.12' }
+      - script: |
+          python -m pip install --upgrade pip
+          pip install -r generated/backend-app/requirements.txt
+        displayName: 'Install dependencies'
+      - script: |
+          cd generated/backend-app
+          python manage.py test
+        displayName: 'Run backend tests'

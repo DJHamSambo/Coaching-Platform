@@ -1,0 +1,16 @@
+jobs:
+  - job: SecurityScan
+    displayName: 'Dependency & static security scan'
+    pool: { vmImage: 'ubuntu-latest' }
+    steps:
+      - script: |
+          pip install bandit
+          bandit -r agents generated/backend-app/api -x '**/migrations/**' || true
+        displayName: 'Bandit (Python static security scan)'
+      - script: |
+          cd generated/frontend-app
+          npm audit --audit-level=high || true
+        displayName: 'npm audit (frontend dependency scan)'
+      - script: |
+          python agents/code_review_agent.py --commit HEAD --base main
+        displayName: 'AI code review CI gate'

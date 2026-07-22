@@ -7,3 +7,4 @@ Second iteration of trying to vibe code a coaching app
 - [Git Flow Agent](docs/gitflow-agent.md)
 - [Developer Agent](docs/developer-agent.md)
 - [UI/UX Agent](docs/ui-ux-agent.md)
+- [DevOps Agent](docs/devops-agent.md)
