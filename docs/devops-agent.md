@@ -173,3 +173,14 @@ python agents/devops_agent.py teardown --environment nonprod --confirm nonprod -
 rules, plan-hash stability and drift detection, the approval gate (blocked
 before approval, allowed after, re-blocked on drift), Bicep/pipeline file
 generation, lifecycle command construction, and the CLI's exit codes.
+
+## Known limitations
+
+- The generated `main.bicep` always wires the `staticWebApp` module for the
+  frontend, and only wires a frontend App Service when the plan lists one.
+  A server-rendered (e.g. Next.js) frontend is priced correctly by
+  `InfrastructurePlanner`, but its App Service module is not yet included in
+  `main.bicep` — only the current app's static Vite/React build is fully
+  wired end-to-end. Extend `BicepGenerator`/`main.bicep` if/when an SSR
+  frontend is introduced.
+

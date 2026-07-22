@@ -408,7 +408,7 @@ class InfrastructurePlanner:
             resources.append(ResourceLine(
                 resource_kind="StorageAccount",
                 azure_service="Azure Storage Account (Blob)",
-                name=f"st{self.app_name.replace('-', '')}{environment}"[:24],
+                name=f"st{self.app_name.replace('-', '')}{environment}".lower()[:24],
                 sku="ZRS" if is_prod else "LRS",
                 purpose="Media/resource uploads + static assets",
                 monthly_cost_usd=_sku_cost("StorageAccount", "ZRS" if is_prod else "LRS"),
@@ -902,6 +902,9 @@ param environmentName string
 param monthlyBudgetUsd int
 param costAlertEmail string
 
+@description('Start of the budget period. utcNow() is only valid as a parameter default in Bicep, so it cannot be inlined directly into the resource below.')
+param budgetStartDate string = utcNow('yyyy-MM-01')
+
 resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
   name: 'ag-${appName}-cost-${environmentName}'
   location: 'global'
@@ -921,7 +924,7 @@ resource budget 'Microsoft.Consumption/budgets@2023-11-01' = {
     amount: monthlyBudgetUsd
     timeGrain: 'Monthly'
     timePeriod: {
-      startDate: '${utcNow('yyyy-MM-01')}'
+      startDate: budgetStartDate
     }
     notifications: {
       actual_50: {
