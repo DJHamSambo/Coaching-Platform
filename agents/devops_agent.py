@@ -1378,6 +1378,7 @@ class DevOpsAgent:
 
 _ADO_API_VERSION = "7.1"
 _ADO_APPROVAL_CHECK_TYPE_ID = "8C6F20A7-A545-4486-9777-F762FAFE0D4D"
+_ADO_REQUEST_TIMEOUT_SECONDS = 30
 
 
 class AdoApiError(RuntimeError):
@@ -1398,7 +1399,7 @@ class AdoRestClient:
         req.add_header("Content-Type", "application/json")
         req.add_header("Accept", "application/json")
         try:
-            with urllib.request.urlopen(req) as resp:  # noqa: S310 - fixed https ADO API host
+            with urllib.request.urlopen(req, timeout=_ADO_REQUEST_TIMEOUT_SECONDS) as resp:  # noqa: S310 - fixed https ADO API host
                 raw = resp.read()
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
@@ -1450,22 +1451,27 @@ class AdoProvisioner:
     def __init__(self, client: AdoRestClient) -> None:
         self.client = client
 
+    @property
+    def _org(self) -> str:
+        """URL-safe organization name, quoted once so every caller stays consistent."""
+        return urllib.parse.quote(self.client.organization)
+
     def _project_base(self, project: str) -> str:
-        return f"https://dev.azure.com/{self.client.organization}/{urllib.parse.quote(project)}"
+        return f"https://dev.azure.com/{self._org}/{urllib.parse.quote(project)}"
 
     def get_project_id(self, project: str) -> str:
         url = f"{self._project_base(project)}/_apis/projects/{urllib.parse.quote(project)}?api-version={_ADO_API_VERSION}"
         return self.client.get(url)["id"]
 
     def get_authenticated_user_id(self) -> str:
-        url = f"https://dev.azure.com/{self.client.organization}/_apis/connectionData?api-version=6.0"
+        url = f"https://dev.azure.com/{self._org}/_apis/connectionData?api-version=6.0"
         return self.client.get(url)["authenticatedUser"]["id"]
 
     def resolve_approver_id(self, approver_email: str | None) -> str:
         if not approver_email:
             return self.get_authenticated_user_id()
         url = (
-            f"https://vssps.dev.azure.com/{self.client.organization}/_apis/identities"
+            f"https://vssps.dev.azure.com/{self._org}/_apis/identities"
             f"?searchFilter=General&filterValue={urllib.parse.quote(approver_email)}&api-version={_ADO_API_VERSION}"
         )
         matches = self.client.get(url).get("value", [])
@@ -1521,7 +1527,7 @@ class AdoProvisioner:
     ) -> tuple[int, bool]:
         """Returns (variable_group_id, created)."""
         list_url = (
-            f"https://dev.azure.com/{self.client.organization}/_apis/distributedtask/variablegroups"
+            f"https://dev.azure.com/{self._org}/_apis/distributedtask/variablegroups"
             f"?groupName={urllib.parse.quote(name)}&api-version={_ADO_API_VERSION}"
         )
         existing = self.client.get(list_url)
@@ -1530,7 +1536,7 @@ class AdoProvisioner:
 
         body_variables = {k: {"value": v, "isSecret": False} for k, v in variables.items()}
         body_variables.update({k: {"value": v, "isSecret": True} for k, v in secret_variables.items()})
-        create_url = f"https://dev.azure.com/{self.client.organization}/_apis/distributedtask/variablegroups?api-version={_ADO_API_VERSION}"
+        create_url = f"https://dev.azure.com/{self._org}/_apis/distributedtask/variablegroups?api-version={_ADO_API_VERSION}"
         created = self.client.post(create_url, {
             "type": "Vsts",
             "name": name,
