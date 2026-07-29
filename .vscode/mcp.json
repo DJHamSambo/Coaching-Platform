@@ -1,0 +1,20 @@
+{
+  "inputs": [
+    {
+      "id": "ado_pat",
+      "type": "promptString",
+      "description": "Azure DevOps Personal Access Token (Code: Read & Write, Build: Read & execute, Environment: Read & manage, minimum scopes for the DevOps agent workflow)",
+      "password": true
+    }
+  ],
+  "servers": {
+    "ado": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@azure-devops/mcp", "simpleeasyit", "--authentication", "envvar"],
+      "env": {
+        "ADO_MCP_AUTH_TOKEN": "${input:ado_pat}"
+      }
+    }
+  }
+}
