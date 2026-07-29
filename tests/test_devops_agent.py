@@ -6,6 +6,9 @@ import unittest
 from pathlib import Path
 
 from agents.devops_agent import (
+    AdoApiError,
+    AdoProvisionPlan,
+    AdoProvisioner,
     ApprovalRequiredError,
     ApprovalState,
     AppAnalyzer,
@@ -292,6 +295,126 @@ class CLITests(unittest.TestCase):
             _write_backend_and_frontend(repo_root)
             exit_code = main(["--repo", str(repo_root), "build", "--environment", "nonprod"])
             self.assertEqual(exit_code, 2)
+
+    def test_provision_ado_dry_run_does_not_require_pat(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            _write_backend_and_frontend(repo_root)
+            exit_code = main([
+                "--repo", str(repo_root),
+                "provision-ado", "--organization", "myorg", "--project", "MyProject",
+            ])
+            self.assertEqual(exit_code, 0)
+
+
+class FakeAdoRestClient:
+    """Records calls and returns canned responses keyed by URL substring,
+    so AdoProvisioner can be tested without any real network access."""
+
+    def __init__(self) -> None:
+        self.organization = "myorg"
+        self.calls: list[tuple[str, str, dict | None]] = []
+        self.environments: list[dict] = []
+        self.checks: list[dict] = []
+        self.variable_groups: list[dict] = []
+        self._next_environment_id = 1
+        self._next_variable_group_id = 100
+
+    def get(self, url: str) -> dict:
+        self.calls.append(("GET", url, None))
+        if "/_apis/projects/" in url:
+            return {"id": "project-id-123"}
+        if "/_apis/connectionData" in url:
+            return {"authenticatedUser": {"id": "self-user-id"}}
+        if "/_apis/identities" in url:
+            return {"value": [{"id": "approver-user-id"}]}
+        if "/_apis/pipelines/checks/configurations" in url:
+            return {"value": [c for c in self.checks if c["resourceId"] in url]}
+        if "/_apis/pipelines/environments" in url:
+            return {"value": list(self.environments)}
+        if "/_apis/distributedtask/variablegroups" in url:
+            name = url.split("groupName=")[1].split("&")[0]
+            return {"value": [g for g in self.variable_groups if g["name"] == name]}
+        raise AssertionError(f"Unexpected GET {url}")
+
+    def post(self, url: str, body: dict) -> dict:
+        self.calls.append(("POST", url, body))
+        if "/_apis/pipelines/environments" in url:
+            env = {"id": str(self._next_environment_id), "name": body["name"]}
+            self._next_environment_id += 1
+            self.environments.append(env)
+            return env
+        if "/_apis/pipelines/checks/configurations" in url:
+            check = {"type": body["type"], "resourceId": body["resource"]["id"]}
+            self.checks.append(check)
+            return check
+        if "/_apis/distributedtask/variablegroups" in url:
+            group = {"id": self._next_variable_group_id, "name": body["name"]}
+            self._next_variable_group_id += 1
+            self.variable_groups.append(group)
+            return group
+        raise AssertionError(f"Unexpected POST {url}")
+
+
+class AdoProvisionerTests(unittest.TestCase):
+    def _plan(self, **overrides) -> AdoProvisionPlan:
+        defaults = dict(
+            organization="myorg",
+            project="MyProject",
+            nonprod_environment="coaching-platform-nonprod",
+            prod_environment="coaching-platform-prod",
+            variable_group="coaching-platform-common",
+            approver_email=None,
+            variables={"AZURE_LOCATION": "uksouth"},
+            secret_variable_names=["postgresAdminPassword"],
+        )
+        defaults.update(overrides)
+        return AdoProvisionPlan(**defaults)
+
+    def test_provision_creates_environments_approval_and_variable_group(self) -> None:
+        client = FakeAdoRestClient()
+        provisioner = AdoProvisioner(client)
+        plan = self._plan()
+
+        summary = provisioner.provision(plan, {"postgresAdminPassword": "s3cret!"})
+
+        self.assertTrue(any("coaching-platform-nonprod" in line and "created" in line for line in summary))
+        self.assertTrue(any("coaching-platform-prod" in line and "created" in line for line in summary))
+        self.assertTrue(any("Approval check" in line and "created" in line for line in summary))
+        self.assertTrue(any("coaching-platform-common" in line and "created" in line for line in summary))
+        self.assertEqual(len(client.environments), 2)
+        self.assertEqual(len(client.checks), 1)
+        self.assertEqual(len(client.variable_groups), 1)
+
+    def test_provision_is_idempotent_on_second_run(self) -> None:
+        client = FakeAdoRestClient()
+        provisioner = AdoProvisioner(client)
+        plan = self._plan()
+
+        provisioner.provision(plan, {"postgresAdminPassword": "s3cret!"})
+        summary = provisioner.provision(plan, {"postgresAdminPassword": "s3cret!"})
+
+        self.assertTrue(all("already existed" in line for line in summary))
+        self.assertEqual(len(client.environments), 2)
+        self.assertEqual(len(client.checks), 1)
+        self.assertEqual(len(client.variable_groups), 1)
+
+    def test_resolve_approver_id_defaults_to_pat_owner(self) -> None:
+        client = FakeAdoRestClient()
+        provisioner = AdoProvisioner(client)
+        self.assertEqual(provisioner.resolve_approver_id(None), "self-user-id")
+
+    def test_resolve_approver_id_looks_up_email(self) -> None:
+        client = FakeAdoRestClient()
+        provisioner = AdoProvisioner(client)
+        self.assertEqual(provisioner.resolve_approver_id("someone@example.com"), "approver-user-id")
+
+    def test_resolve_approver_id_raises_when_not_found(self) -> None:
+        client = FakeAdoRestClient()
+        client.get = lambda url: {"value": []} if "/_apis/identities" in url else FakeAdoRestClient.get(client, url)
+        provisioner = AdoProvisioner(client)
+        with self.assertRaises(AdoApiError):
+            provisioner.resolve_approver_id("nobody@example.com")
 
 
 if __name__ == "__main__":

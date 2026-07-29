@@ -40,14 +40,22 @@ Usage
     python agents/devops_agent.py spin-down --environment nonprod --execute
     python agents/devops_agent.py spin-up --environment nonprod --execute
     python agents/devops_agent.py teardown --environment nonprod --confirm nonprod --execute
+    python agents/devops_agent.py provision-ado --organization myorg --project MyProject
+    python agents/devops_agent.py provision-ado --organization myorg --project MyProject --execute
 """
 
 import argparse
+import base64
+import getpass
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1356,6 +1364,219 @@ class DevOpsAgent:
 
 
 # ---------------------------------------------------------------------------
+# Azure DevOps project provisioning (Environments, approvals, variable groups)
+# ---------------------------------------------------------------------------
+#
+# The Azure DevOps MCP server (local and remote) does not expose tools for
+# managing pipeline Environments, approval checks, or variable groups, so
+# this agent talks to the underlying Azure DevOps REST API directly using
+# only the standard library (no extra dependency). Deliberately NOT handled
+# here: creating an Azure Resource Manager service connection, because that
+# requires minting an Azure AD app registration / service principal secret,
+# which is a sensitive, credential-issuing action best done interactively
+# (see docs/devops-agent.md for the manual steps).
+
+_ADO_API_VERSION = "7.1"
+_ADO_APPROVAL_CHECK_TYPE_ID = "8C6F20A7-A545-4486-9777-F762FAFE0D4D"
+
+
+class AdoApiError(RuntimeError):
+    """Raised when an Azure DevOps REST API call fails."""
+
+
+class AdoRestClient:
+    """Minimal PAT-authenticated client for Azure DevOps REST APIs."""
+
+    def __init__(self, organization: str, pat: str) -> None:
+        self.organization = organization
+        self._auth_header = "Basic " + base64.b64encode(f":{pat}".encode("utf-8")).decode("ascii")
+
+    def request(self, method: str, url: str, body: dict | None = None) -> dict:
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Authorization", self._auth_header)
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Accept", "application/json")
+        try:
+            with urllib.request.urlopen(req) as resp:  # noqa: S310 - fixed https ADO API host
+                raw = resp.read()
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise AdoApiError(f"{method} {url} -> HTTP {exc.code}: {detail}") from exc
+
+    def get(self, url: str) -> dict:
+        return self.request("GET", url)
+
+    def post(self, url: str, body: dict) -> dict:
+        return self.request("POST", url, body)
+
+
+@dataclass(frozen=True)
+class AdoProvisionPlan:
+    organization: str
+    project: str
+    nonprod_environment: str
+    prod_environment: str
+    variable_group: str
+    approver_email: str | None
+    variables: dict[str, str]
+    secret_variable_names: list[str]
+
+    def to_markdown(self) -> str:
+        lines = [
+            "# Azure DevOps provisioning plan",
+            "",
+            f"- Organization: `{self.organization}`",
+            f"- Project: `{self.project}`",
+            f"- Environments: `{self.nonprod_environment}` (no approval), "
+            f"`{self.prod_environment}` (manual approval required)",
+            f"- Approver: {self.approver_email or '(the PAT owner)'}",
+            f"- Variable group: `{self.variable_group}`",
+            f"  - Plain variables: {', '.join(sorted(self.variables)) or '(none)'}",
+            f"  - Secret variables: {', '.join(self.secret_variable_names) or '(none)'}",
+            "",
+            "NOT created by this command: the Azure Resource Manager service "
+            "connection (requires interactively creating an app "
+            "registration/service principal) - see docs/devops-agent.md.",
+        ]
+        return "\n".join(lines)
+
+
+class AdoProvisioner:
+    """Idempotently creates the Environments/approval check/variable group
+    that ``azure-pipelines.yml`` references, using direct REST calls."""
+
+    def __init__(self, client: AdoRestClient) -> None:
+        self.client = client
+
+    def _project_base(self, project: str) -> str:
+        return f"https://dev.azure.com/{self.client.organization}/{urllib.parse.quote(project)}"
+
+    def get_project_id(self, project: str) -> str:
+        url = f"{self._project_base(project)}/_apis/projects/{urllib.parse.quote(project)}?api-version={_ADO_API_VERSION}"
+        return self.client.get(url)["id"]
+
+    def get_authenticated_user_id(self) -> str:
+        url = f"https://dev.azure.com/{self.client.organization}/_apis/connectionData?api-version=6.0"
+        return self.client.get(url)["authenticatedUser"]["id"]
+
+    def resolve_approver_id(self, approver_email: str | None) -> str:
+        if not approver_email:
+            return self.get_authenticated_user_id()
+        url = (
+            f"https://vssps.dev.azure.com/{self.client.organization}/_apis/identities"
+            f"?searchFilter=General&filterValue={urllib.parse.quote(approver_email)}&api-version={_ADO_API_VERSION}"
+        )
+        matches = self.client.get(url).get("value", [])
+        if not matches:
+            raise AdoApiError(f"No Azure DevOps identity found for '{approver_email}'")
+        return matches[0]["id"]
+
+    def ensure_environment(self, project: str, name: str) -> tuple[str, bool]:
+        """Returns (environment_id, created)."""
+        list_url = f"{self._project_base(project)}/_apis/pipelines/environments?api-version={_ADO_API_VERSION}"
+        existing = self.client.get(list_url)
+        for env in existing.get("value", []):
+            if env["name"] == name:
+                return env["id"], False
+        created = self.client.post(list_url, {
+            "name": name,
+            "description": "Managed as code by agents/devops_agent.py",
+        })
+        return created["id"], True
+
+    def has_approval_check(self, project: str, environment_id: str) -> bool:
+        url = (
+            f"{self._project_base(project)}/_apis/pipelines/checks/configurations"
+            f"?resourceType=environment&resourceId={environment_id}&api-version=7.2-preview.1"
+        )
+        existing = self.client.get(url)
+        return any(c.get("type", {}).get("name") == "Approval" for c in existing.get("value", []))
+
+    def ensure_approval_check(self, project: str, environment_id: str, approver_id: str) -> bool:
+        """Returns True if a new approval check was created."""
+        if self.has_approval_check(project, environment_id):
+            return False
+        url = f"{self._project_base(project)}/_apis/pipelines/checks/configurations?api-version=7.2-preview.1"
+        self.client.post(url, {
+            "type": {"id": _ADO_APPROVAL_CHECK_TYPE_ID, "name": "Approval"},
+            "settings": {
+                "approvers": [{"id": approver_id}],
+                "instructions": "Review the InfraPlan/CostGate results before approving a production deployment.",
+                "minRequiredApprovers": 1,
+                "requesterCannotBeApprover": False,
+            },
+            "resource": {"type": "environment", "id": environment_id},
+        })
+        return True
+
+    def ensure_variable_group(
+        self,
+        project: str,
+        project_id: str,
+        name: str,
+        variables: dict[str, str],
+        secret_variables: dict[str, str],
+    ) -> tuple[int, bool]:
+        """Returns (variable_group_id, created)."""
+        list_url = (
+            f"https://dev.azure.com/{self.client.organization}/_apis/distributedtask/variablegroups"
+            f"?groupName={urllib.parse.quote(name)}&api-version={_ADO_API_VERSION}"
+        )
+        existing = self.client.get(list_url)
+        if existing.get("value"):
+            return existing["value"][0]["id"], False
+
+        body_variables = {k: {"value": v, "isSecret": False} for k, v in variables.items()}
+        body_variables.update({k: {"value": v, "isSecret": True} for k, v in secret_variables.items()})
+        create_url = f"https://dev.azure.com/{self.client.organization}/_apis/distributedtask/variablegroups?api-version={_ADO_API_VERSION}"
+        created = self.client.post(create_url, {
+            "type": "Vsts",
+            "name": name,
+            "description": "Managed as code by agents/devops_agent.py",
+            "variables": body_variables,
+            "variableGroupProjectReferences": [
+                {"name": name, "projectReference": {"id": project_id, "name": project}}
+            ],
+        })
+        return created["id"], True
+
+    def provision(self, plan: AdoProvisionPlan, secret_values: dict[str, str]) -> list[str]:
+        summary: list[str] = []
+        project_id = self.get_project_id(plan.project)
+
+        nonprod_id, nonprod_created = self.ensure_environment(plan.project, plan.nonprod_environment)
+        summary.append(
+            f"Environment '{plan.nonprod_environment}': "
+            f"{'created' if nonprod_created else 'already existed'} (id={nonprod_id})"
+        )
+
+        prod_id, prod_created = self.ensure_environment(plan.project, plan.prod_environment)
+        summary.append(
+            f"Environment '{plan.prod_environment}': "
+            f"{'created' if prod_created else 'already existed'} (id={prod_id})"
+        )
+
+        approver_id = self.resolve_approver_id(plan.approver_email)
+        approval_created = self.ensure_approval_check(plan.project, prod_id, approver_id)
+        summary.append(
+            f"Approval check on '{plan.prod_environment}': "
+            f"{'created' if approval_created else 'already existed'} (approver id={approver_id})"
+        )
+
+        vg_id, vg_created = self.ensure_variable_group(
+            plan.project, project_id, plan.variable_group, plan.variables, secret_values,
+        )
+        summary.append(
+            f"Variable group '{plan.variable_group}': "
+            f"{'created' if vg_created else 'already existed'} (id={vg_id})"
+        )
+
+        return summary
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1390,6 +1611,37 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         sub.add_argument("--execute", action="store_true", help="Actually run az CLI commands (default: dry-run/print only)")
         if name == "teardown":
             sub.add_argument("--confirm", help="Must exactly equal the environment name to allow teardown")
+
+    provision_parser = subparsers.add_parser(
+        "provision-ado",
+        help="Create the Azure DevOps Environments, prod approval check, and variable group "
+             "referenced by azure-pipelines.yml",
+    )
+    provision_parser.add_argument("--organization", required=True, help="Azure DevOps organization, e.g. 'contoso'")
+    provision_parser.add_argument("--project", required=True, help="Azure DevOps project name")
+    provision_parser.add_argument("--nonprod-environment", default=None)
+    provision_parser.add_argument("--prod-environment", default=None)
+    provision_parser.add_argument("--variable-group", default=None)
+    provision_parser.add_argument(
+        "--approver-email", default=None,
+        help="Azure DevOps user to add as the prod approval-check approver (default: the PAT owner)",
+    )
+    provision_parser.add_argument(
+        "--variable", action="append", default=[], metavar="KEY=VALUE",
+        help="Non-secret variable to add to the variable group (repeatable)",
+    )
+    provision_parser.add_argument(
+        "--secret-variable", action="append", default=[], metavar="KEY",
+        help="Secret variable name to add to the variable group; value is prompted for securely (repeatable)",
+    )
+    provision_parser.add_argument(
+        "--pat-env-var", default="ADO_MCP_AUTH_TOKEN",
+        help="Environment variable holding the Azure DevOps PAT (default: ADO_MCP_AUTH_TOKEN)",
+    )
+    provision_parser.add_argument(
+        "--execute", action="store_true",
+        help="Actually call the Azure DevOps REST API (default: dry-run/print only)",
+    )
 
     return parser
 
@@ -1466,6 +1718,56 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "spin-up":
         agent.spin_up(args.environment, args.execute)
+        return 0
+
+    if args.command == "provision-ado":
+        variables: dict[str, str] = {}
+        for item in args.variable:
+            if "=" not in item:
+                print(f"Invalid --variable '{item}', expected KEY=VALUE", file=sys.stderr)
+                return 2
+            key, _, value = item.partition("=")
+            variables[key] = value
+
+        provision_plan = AdoProvisionPlan(
+            organization=args.organization,
+            project=args.project,
+            nonprod_environment=args.nonprod_environment or f"{args.app_name}-nonprod",
+            prod_environment=args.prod_environment or f"{args.app_name}-prod",
+            variable_group=args.variable_group or f"{args.app_name}-common",
+            approver_email=args.approver_email,
+            variables=variables,
+            secret_variable_names=list(args.secret_variable),
+        )
+        print(provision_plan.to_markdown())
+
+        if not args.execute:
+            print("\n(dry run - pass --execute to actually create these in Azure DevOps)")
+            return 0
+
+        pat = os.environ.get(args.pat_env_var) or getpass.getpass(
+            f"Azure DevOps Personal Access Token (input hidden; set ${args.pat_env_var} to skip this prompt): "
+        )
+        if not pat:
+            print("No PAT provided.", file=sys.stderr)
+            return 2
+
+        secret_values = {
+            name: getpass.getpass(f"Value for secret variable '{name}': ")
+            for name in provision_plan.secret_variable_names
+        }
+
+        client = AdoRestClient(args.organization, pat)
+        provisioner = AdoProvisioner(client)
+        try:
+            summary = provisioner.provision(provision_plan, secret_values)
+        except AdoApiError as exc:
+            print(f"FAILED: {exc}", file=sys.stderr)
+            return 1
+
+        print("\nDone:")
+        for line in summary:
+            print(f"  - {line}")
         return 0
 
     parser.error(f"Unknown command: {args.command}")

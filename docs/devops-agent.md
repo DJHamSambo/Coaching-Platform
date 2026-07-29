@@ -155,7 +155,43 @@ python agents/devops_agent.py spin-up --environment nonprod --execute
 
 # Permanently delete an environment (requires --confirm matching the environment name)
 python agents/devops_agent.py teardown --environment nonprod --confirm nonprod --execute
+
+# Create the Azure DevOps Environments, prod approval check, and variable group that
+# azure-pipelines.yml references (dry-run by default; add --execute to actually call the REST API)
+python agents/devops_agent.py provision-ado --organization myorg --project MyProject
+python agents/devops_agent.py provision-ado --organization myorg --project MyProject \
+  --approver-email alex@example.com \
+  --secret-variable postgresAdminPassword \
+  --execute
 ```
+
+### `provision-ado`
+
+The Azure DevOps MCP server (local and remote) doesn't expose tools for
+managing pipeline Environments, approval checks, or variable groups. This
+subcommand fills that gap by calling the Azure DevOps REST API directly
+(stdlib `urllib` only, no extra dependency), so the setup is scripted and
+repeatable instead of manual UI clicking:
+
+- Creates `<app-name>-nonprod` and `<app-name>-prod` Environments (or reuses
+  them if they already exist).
+- Adds a manual **Approval** check to the prod environment, with the
+  approver defaulting to the PAT owner (override with `--approver-email`).
+- Creates the `<app-name>-common` variable group referenced by
+  `azure-pipelines.yml`, optionally seeded with `--variable KEY=VALUE`
+  (plain) and `--secret-variable KEY` (value prompted for securely via
+  `getpass`, never passed on the command line).
+- Everything is idempotent: re-running it only fills in what's missing.
+
+Authentication: reads a PAT from the `ADO_MCP_AUTH_TOKEN` environment
+variable (the same one used by `.vscode/mcp.json`) by default, or prompts
+securely if unset. Override the variable name with `--pat-env-var`.
+
+**Deliberately not automated:** the Azure Resource Manager service
+connection. Creating one requires minting an Azure AD app
+registration/service principal secret, which is a sensitive,
+credential-issuing action best done interactively via Project Settings >
+Service connections > Azure Resource Manager in the Azure DevOps UI.
 
 ## Files this agent owns
 
