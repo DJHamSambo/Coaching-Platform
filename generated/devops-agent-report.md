@@ -1,6 +1,6 @@
 # DevOps Agent Plan - coaching-platform
 
-Generated: 2026-07-22T19:56:06.165818+00:00
+Generated: 2026-07-31T22:07:49.526003+00:00
 
 ## Detected application
 - **backend**: django (python), database=postgresql

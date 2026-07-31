@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -220,6 +221,29 @@ class AzurePipelineGeneratorTests(unittest.TestCase):
             pipeline_text = (repo_root / "azure-pipelines.yml").read_text(encoding="utf-8")
             self.assertIn("coaching-platform-prod", pipeline_text)
             self.assertIn("CostGate", pipeline_text)
+
+    def test_pipeline_template_references_match_actual_write_location(self) -> None:
+        # azure-pipelines.yml is written to the repo root while its templates are
+        # written under <pipelines_dir>/templates/, so every `template:` reference
+        # must be relative to the repo root (i.e. prefixed with the pipelines dir
+        # name), not relative to azure-pipelines.yml's own directory.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            _write_backend_and_frontend(repo_root)
+            profile = AppAnalyzer().analyze(repo_root)
+            plan = InfrastructurePlanner(app_name="test-app").build_plan(profile)
+
+            pipelines_dir = repo_root / "pipelines"
+            AzurePipelineGenerator().write(plan, pipelines_dir)
+
+            pipeline_text = (repo_root / "azure-pipelines.yml").read_text(encoding="utf-8")
+            template_refs = re.findall(r"template:\s*(\S+\.yml)", pipeline_text)
+            self.assertTrue(template_refs, "expected at least one template: reference")
+            for ref in template_refs:
+                self.assertTrue(
+                    (repo_root / ref).exists(),
+                    f"template reference '{ref}' does not resolve to a file relative to repo root",
+                )
 
 
 class LifecycleCommandBuilderTests(unittest.TestCase):
