@@ -13,35 +13,35 @@ stages:
   - stage: BuildAndTest
     displayName: 'Build & test'
     jobs:
-      - template: templates/build-backend.yml
-      - template: templates/build-frontend.yml
+      - template: pipelines/templates/build-backend.yml
+      - template: pipelines/templates/build-frontend.yml
 
   - stage: SecurityScan
     displayName: 'Security scan'
     dependsOn: BuildAndTest
     jobs:
-      - template: templates/security-scan.yml
+      - template: pipelines/templates/security-scan.yml
 
   - stage: InfraPlan
     displayName: 'Infrastructure plan (what-if)'
     dependsOn: SecurityScan
     jobs:
-      - template: templates/infra-plan.yml
+      - template: pipelines/templates/infra-plan.yml
         parameters: { environment: 'nonprod' }
-      - template: templates/infra-plan.yml
+      - template: pipelines/templates/infra-plan.yml
         parameters: { environment: 'prod' }
 
   - stage: CostGate
     displayName: 'Cost guardrail gate'
     dependsOn: InfraPlan
     jobs:
-      - template: templates/cost-gate.yml
+      - template: pipelines/templates/cost-gate.yml
 
   - stage: DeployNonProd
     displayName: 'Deploy non-prod'
     dependsOn: CostGate
     jobs:
-      - template: templates/deploy.yml
+      - template: pipelines/templates/deploy.yml
         parameters: { environment: 'nonprod' }
 
   # Deploying to prod requires manual sign-off. Configure the approval check
@@ -57,5 +57,5 @@ stages:
           runOnce:
             deploy:
               steps:
-                - template: templates/deploy.yml
+                - template: pipelines/templates/deploy.yml
                   parameters: { environment: 'prod' }
