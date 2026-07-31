@@ -45,6 +45,22 @@ python agents/gitflow_agent.py \
   --execute
 ```
 
+By default the agent runs `git add -A` before committing. If your working tree has unrelated
+pre-existing noise you don't want swept into the commit (e.g. this repo's tracked
+`generated/frontend-app/node_modules/` churn), stage only the files you want yourself first,
+then pass `--no-stage-all` so the agent commits exactly what's staged:
+
+```bash
+git add path/to/file1.py path/to/file2.md
+python agents/gitflow_agent.py \
+  --repo . \
+  --feature "requirements-agent" \
+  --commit-message "feat: add requirements agent" \
+  --summary "Add the requirements distillation agent and its documentation." \
+  --no-stage-all \
+  --execute
+```
+
 Merge a reviewed feature into `main` and clean up the feature branch:
 
 ```bash
@@ -92,6 +108,7 @@ Auto-implement options:
 
 - **Feature branch creation is the default mode** when no action flag (`--merge-feature-into-main`, `--cleanup-feature-branch`, `--run-ci`) is specified.
 - Passing `--create-feature` is deprecated but still accepted for backward compatibility; it does not change the default behavior.
+- `--no-stage-all` skips the `git add -A` step; stage the intended files yourself beforehand (see Usage above). If nothing is staged, the commit is skipped, matching the existing empty-commit idempotency behavior.
 - The default mode is a safe dry run.
 - Passing `--execute` runs the git commands directly.
 - The mainline branch is configurable through `--main-branch` (default: `main`).

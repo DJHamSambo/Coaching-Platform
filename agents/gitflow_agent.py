@@ -1055,6 +1055,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="(Deprecated: now default) Create a feature branch and stage changes.",
     )
     parser.add_argument(
+        "--no-stage-all",
+        action="store_true",
+        help="Do not run 'git add -A' before committing; only commit changes already staged by the "
+             "caller. Use this to avoid sweeping in unrelated pre-existing working-tree noise "
+             "(e.g. tracked node_modules churn) - stage the intended files yourself first.",
+    )
+    parser.add_argument(
         "--cleanup-feature-branch",
         action="store_true",
         help="Clean up a merged feature branch (local and/or remote).",
@@ -1171,6 +1178,7 @@ def main() -> int:
         commit_message=args.commit_message,
         change_summary=args.summary,
         execute=args.execute,
+        stage_all=not args.no_stage_all,
     )
     print(json.dumps(plan.to_dict(), indent=2))
     return 0

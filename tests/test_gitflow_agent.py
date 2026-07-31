@@ -6,7 +6,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from agents.gitflow_agent import AutoImplementResult, CIResult, DryRunPullRequestBackend, GitFlowAgent, PullRequestResult
+from agents.gitflow_agent import (
+    AutoImplementResult,
+    CIResult,
+    DryRunPullRequestBackend,
+    GitFlowAgent,
+    PullRequestResult,
+    _build_parser,
+)
 
 
 class GitFlowAgentTests(unittest.TestCase):
@@ -54,6 +61,47 @@ class GitFlowAgentTests(unittest.TestCase):
 
         self.assertEqual(plan.feature_pull_request.request.base, "main")
         self.assertEqual(plan.feature_pull_request.request.head, "feature/main-workflow")
+
+    def test_process_change_stage_all_true_includes_add_dash_a(self) -> None:
+        agent = GitFlowAgent(
+            repo_path="/tmp/workspace/DJHamSambo/Coaching-Platform",
+            pr_backend=DryRunPullRequestBackend(),
+        )
+
+        plan = agent.process_change(
+            feature_name="Stage All",
+            commit_message="feat: default stage-all behavior",
+            change_summary="Default behavior stages everything.",
+            execute=False,
+        )
+
+        self.assertTrue(any(cmd[-2:] == ["add", "-A"] for cmd in plan.commands))
+
+    def test_process_change_stage_all_false_omits_add_dash_a(self) -> None:
+        agent = GitFlowAgent(
+            repo_path="/tmp/workspace/DJHamSambo/Coaching-Platform",
+            pr_backend=DryRunPullRequestBackend(),
+        )
+
+        plan = agent.process_change(
+            feature_name="No Stage All",
+            commit_message="feat: caller stages explicit files",
+            change_summary="Caller stages only intended files before calling this.",
+            execute=False,
+            stage_all=False,
+        )
+
+        self.assertFalse(any(cmd[-2:] == ["add", "-A"] for cmd in plan.commands))
+        self.assertTrue(any(cmd[-2:] == ["-m", "feat: caller stages explicit files"] for cmd in plan.commands))
+
+    def test_build_parser_no_stage_all_flag_defaults_false_and_can_be_set(self) -> None:
+        parser = _build_parser()
+
+        default_args = parser.parse_args(["--feature", "x"])
+        self.assertFalse(default_args.no_stage_all)
+
+        flagged_args = parser.parse_args(["--feature", "x", "--no-stage-all"])
+        self.assertTrue(flagged_args.no_stage_all)
 
     def test_process_change_falls_back_to_dry_run_prs(self) -> None:
         failing_backend = Mock()
@@ -125,6 +173,33 @@ class GitFlowAgentTests(unittest.TestCase):
         self.assertTrue(any(" checkout feature/requirements-agent" in c for c in all_calls))
         self.assertFalse(any(" checkout -b feature/requirements-agent" in c for c in all_calls))
         self.assertFalse(any(" commit -m " in c for c in all_calls))
+
+    @patch("agents.gitflow_agent.subprocess.run")
+    @patch("agents.gitflow_agent._local_branch_exists", return_value=True)
+    @patch.object(GitFlowAgent, "_has_staged_changes", return_value=True)
+    def test_process_change_execute_with_stage_all_false_skips_add_dash_a(
+        self,
+        _has_changes: Mock,
+        _branch_exists: Mock,
+        run_mock: Mock,
+    ) -> None:
+        run_mock.return_value = Mock(returncode=0, stderr="")
+        agent = GitFlowAgent(
+            repo_path="/tmp/workspace/DJHamSambo/Coaching-Platform",
+            pr_backend=DryRunPullRequestBackend(),
+        )
+
+        agent.process_change(
+            feature_name="Requirements Agent",
+            commit_message="feat: caller staged files explicitly",
+            change_summary="Caller stages only intended files before calling this.",
+            execute=True,
+            stage_all=False,
+        )
+
+        all_calls = [" ".join(call.args[0]) for call in run_mock.call_args_list]
+        self.assertFalse(any(" add -A" in c for c in all_calls))
+        self.assertTrue(any(" commit -m " in c for c in all_calls))
 
     @patch.object(GitFlowAgent, "_run_git")
     @patch("agents.gitflow_agent._remote_branch_exists", return_value=False)
