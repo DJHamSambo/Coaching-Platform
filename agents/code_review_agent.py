@@ -969,6 +969,99 @@ class CodeReviewAgent:
         print(f"[info] chat review request \u2192 {target}", file=sys.stderr)
         return target
 
+    def write_chat_review_report(
+        self,
+        repo_path: Path,
+        commit: str,
+        base: str,
+        result_data: dict,
+        diff_file: Path | None = None,
+        out_path: Path | None = None,
+    ) -> Path:
+        """Refresh ``code-review-report.md`` from a chat-mode CI verdict.
+
+        Mirrors :meth:`review`'s ``write_report=True`` behaviour for the
+        model-driven path, but renders from the aggregate verdict a chat agent
+        writes to ``generated/code-review-result.json`` (score, severity
+        counts, verdict, summary) instead of per-model structured findings.
+        Called after the verdict's ``diff_hash`` has been confirmed fresh.
+        """
+        timestamp  = dt.datetime.now(dt.timezone.utc).isoformat()
+        diff_files = self.get_diff(repo_path, commit, base, diff_file)
+        reviewable = self._select_reviewable(diff_files)
+        document   = self._build_chat_report(
+            commit=commit,
+            base=base,
+            timestamp=timestamp,
+            diff_hash=diff_fingerprint(reviewable),
+            files_reviewed=[d.path for d in reviewable],
+            result_data=result_data,
+        )
+
+        target = out_path or (repo_path / self.REPORT_FILENAME)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(document, encoding="utf-8")
+        print(f"[info] chat review report \u2192 {target}", file=sys.stderr)
+        return target
+
+    def _build_chat_report(
+        self,
+        *,
+        commit: str,
+        base: str,
+        timestamp: str,
+        diff_hash: str,
+        files_reviewed: list[str],
+        result_data: dict,
+    ) -> str:
+        def _as_int(value: object) -> int:
+            try:
+                return max(0, int(value))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return 0
+
+        critical = _as_int(result_data.get("critical"))
+        high     = _as_int(result_data.get("high"))
+        medium   = _as_int(result_data.get("medium"))
+        low      = _as_int(result_data.get("low"))
+        try:
+            score = float(result_data.get("score", 0))
+        except (TypeError, ValueError):
+            score = 0.0
+        verdict  = str(result_data.get("verdict", "")).strip().lower() or "unknown"
+        summary  = str(result_data.get("summary", "")).strip() or "_(no summary provided)_"
+
+        lines: list[str] = []
+        a = lines.append
+
+        a("# Code Review Report")
+        a("")
+        a("| Field | Value |")
+        a("|---|---|")
+        a("| Mode | chat (interactive review, no external model called) |")
+        a(f"| Commit | `{commit}` |")
+        a(f"| Base | `{base}` |")
+        a(f"| Timestamp | {timestamp} |")
+        a(f"| Diff hash | `{diff_hash}` |")
+        a(f"| Quality score | **{score}/10** |")
+        a(f"| Verdict | **{verdict}** |")
+        a(f"| Findings | critical={critical}, high={high}, medium={medium}, low={low} |")
+        a(f"| Files reviewed | {len(files_reviewed)} |")
+        a("")
+
+        a("## Files reviewed")
+        a("")
+        for f in files_reviewed:
+            a(f"- `{f}`")
+        a("")
+
+        a("## Summary")
+        a("")
+        a(summary)
+        a("")
+
+        return "\n".join(lines)
+
     def run_model_reviews(
         self,
         diff_files: list[DiffFile],

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 import unittest
@@ -223,6 +224,62 @@ class GitFlowAgentTests(unittest.TestCase):
 
         self.assertEqual(cleanup_plan.feature_branch, "feature/requirements-agent")
         self.assertEqual(run_git_mock.call_count, 1)
+
+    @patch("agents.gitflow_agent._CodeReviewAgent")
+    def test_run_chat_code_review_ci_refreshes_code_review_report(self, agent_cls_mock: Mock) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            result_path = repo_root / "generated" / "code-review-result.json"
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            result_data = {
+                "diff_hash": "abc123",
+                "commit": "feature/x",
+                "base": "main",
+                "score": 9,
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "verdict": "pass",
+                "summary": "Looks good.",
+            }
+            result_path.write_text(json.dumps(result_data), encoding="utf-8")
+
+            agent_instance = Mock()
+            request_path = repo_root / "generated" / "code-review-request.md"
+            agent_instance.emit_review_request.return_value = request_path
+            agent_instance.review_fingerprint.return_value = "abc123"
+            agent_cls_mock.return_value = agent_instance
+
+            agent = GitFlowAgent(repo_path=str(repo_root), pr_backend=DryRunPullRequestBackend())
+            ci_result = agent.run_chat_code_review_ci("feature/x", "main")
+
+            self.assertTrue(ci_result.passed)
+            agent_instance.write_chat_review_report.assert_called_once_with(
+                repo_path=repo_root,
+                commit="feature/x",
+                base="main",
+                result_data=result_data,
+            )
+
+    @patch("agents.gitflow_agent._CodeReviewAgent")
+    def test_run_chat_code_review_ci_skips_report_refresh_when_result_stale(self, agent_cls_mock: Mock) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            result_path = repo_root / "generated" / "code-review-result.json"
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            result_path.write_text(json.dumps({"diff_hash": "stale-hash", "score": 9, "verdict": "pass"}), encoding="utf-8")
+
+            agent_instance = Mock()
+            agent_instance.emit_review_request.return_value = repo_root / "generated" / "code-review-request.md"
+            agent_instance.review_fingerprint.return_value = "current-hash"
+            agent_cls_mock.return_value = agent_instance
+
+            agent = GitFlowAgent(repo_path=str(repo_root), pr_backend=DryRunPullRequestBackend())
+            ci_result = agent.run_chat_code_review_ci("feature/x", "main")
+
+            self.assertFalse(ci_result.passed)
+            agent_instance.write_chat_review_report.assert_not_called()
 
     @patch.object(GitFlowAgent, "run_code_review_ci")
     @patch.object(GitFlowAgent, "_dispatch_developer_fixers", return_value=True)

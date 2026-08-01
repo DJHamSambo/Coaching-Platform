@@ -652,6 +652,13 @@ class GitFlowAgent:
 
         passed = verdict != "fail" and (critical + high + medium) == 0
 
+        agent.write_chat_review_report(
+            repo_path=self.repo_path,
+            commit=feature_branch,
+            base=base_branch,
+            result_data=data,
+        )
+
         return CIResult(
             passed=passed,
             score=score,
