@@ -41,8 +41,15 @@ stages:
     displayName: 'Deploy non-prod'
     dependsOn: CostGate
     jobs:
-      - template: pipelines/templates/deploy.yml
-        parameters: { environment: 'nonprod' }
+      - deployment: DeployNonProd
+        displayName: 'Deploy to non-prod'
+        environment: 'coaching-platform-nonprod'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: pipelines/templates/deploy.yml
+                  parameters: { environment: 'nonprod' }
 
   # Deploying to prod requires manual sign-off. Configure the approval check
   # on the 'coaching-platform-prod' environment in Azure DevOps

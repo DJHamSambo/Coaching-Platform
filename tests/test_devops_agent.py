@@ -245,6 +245,36 @@ class AzurePipelineGeneratorTests(unittest.TestCase):
                     f"template reference '{ref}' does not resolve to a file relative to repo root",
                 )
 
+    def test_deploy_template_is_only_referenced_inside_a_deployment_jobs_steps_block(self) -> None:
+        # pipelines/templates/deploy.yml is a *steps* template (top-level `parameters:` +
+        # `steps:`), so it can only be included under a job's `steps:` list. Referencing
+        # it directly as an entry of a stage's `jobs:` list (i.e. as if it were a jobs
+        # template) fails Azure Pipelines schema validation ("Unexpected value").
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            _write_backend_and_frontend(repo_root)
+            profile = AppAnalyzer().analyze(repo_root)
+            plan = InfrastructurePlanner(app_name="test-app").build_plan(profile)
+
+            pipelines_dir = repo_root / "pipelines"
+            AzurePipelineGenerator().write(plan, pipelines_dir)
+
+            pipeline_text = (repo_root / "azure-pipelines.yml").read_text(encoding="utf-8")
+            deploy_template_path = (pipelines_dir.relative_to(repo_root) / "templates" / "deploy.yml").as_posix()
+
+            for match in re.finditer(rf"^(?P<indent> *)- template: {re.escape(deploy_template_path)}", pipeline_text, re.MULTILINE):
+                preceding_text = pipeline_text[: match.start()]
+                preceding_lines = preceding_text.splitlines()
+                nearest_key_line = next(
+                    line for line in reversed(preceding_lines) if line.strip().endswith(":")
+                )
+                self.assertIn(
+                    "steps:",
+                    nearest_key_line,
+                    f"'{deploy_template_path}' must only be referenced under a 'steps:' list, "
+                    f"found under '{nearest_key_line.strip()}' instead",
+                )
+
 
 class LifecycleCommandBuilderTests(unittest.TestCase):
     def _plan(self, repo_root: Path):
