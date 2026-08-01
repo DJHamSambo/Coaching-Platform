@@ -967,6 +967,17 @@ class GitFlowAgent:
                     ci_result=ci_result,
                 )
 
+            # The chat CI gate rewrites code-review-report.md in the working
+            # tree (fresh timestamp/hash) as a side effect of running the
+            # review. That leaves the tree dirty and blocks the upcoming
+            # `git checkout <main>` below. The committed report already
+            # reflects the passing verdict, so discard this regenerated
+            # copy rather than failing the merge on a self-inflicted diff.
+            self._run_git(
+                ["checkout", "--", _CodeReviewAgent.REPORT_FILENAME],
+                check=False,
+            )
+
         merge_commands = [
             ["git", "-C", str(self.repo_path), "fetch", "origin"],
             ["git", "-C", str(self.repo_path), "checkout", self.main_branch],

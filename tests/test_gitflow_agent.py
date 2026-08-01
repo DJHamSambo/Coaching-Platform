@@ -390,6 +390,51 @@ class GitFlowAgentTests(unittest.TestCase):
         self.assertIsNotNone(plan.auto_implement)
         auto_impl_mock.assert_called_once()
 
+    @patch.object(GitFlowAgent, "_run_git")
+    @patch.object(GitFlowAgent, "_is_ancestor", return_value=True)
+    @patch("agents.gitflow_agent._remote_branch_exists", return_value=False)
+    @patch("agents.gitflow_agent._local_branch_exists", return_value=False)
+    @patch.object(GitFlowAgent, "run_code_review_ci")
+    def test_merge_feature_into_main_discards_regenerated_review_report_before_checkout(
+        self,
+        run_ci_mock: Mock,
+        _local_exists: Mock,
+        _remote_exists: Mock,
+        _is_ancestor: Mock,
+        run_git_mock: Mock,
+    ) -> None:
+        # The chat CI gate rewrites code-review-report.md as a side effect of
+        # running the review, which would otherwise dirty the tree and block
+        # the subsequent `git checkout main`. Verify the merge discards that
+        # regenerated file (via `checkout -- <report>`) before switching
+        # branches.
+        run_git_mock.return_value = Mock(returncode=0, stdout="", stderr="")
+        run_ci_mock.return_value = CIResult(
+            passed=True,
+            score=9.0,
+            models_used=["chat"],
+            critical=0,
+            high=0,
+            medium=0,
+            low=0,
+            fix_instructions_path=None,
+        )
+
+        agent = GitFlowAgent(
+            repo_path="/tmp/workspace/DJHamSambo/Coaching-Platform",
+            pr_backend=DryRunPullRequestBackend(),
+        )
+
+        agent.merge_feature_into_main(
+            feature_name="Requirements Agent",
+            execute=True,
+        )
+
+        all_calls = [call.args[0] for call in run_git_mock.call_args_list]
+        discard_index = all_calls.index(["checkout", "--", "code-review-report.md"])
+        checkout_main_index = all_calls.index(["checkout", "main"])
+        self.assertLess(discard_index, checkout_main_index)
+
     def test_end_to_end_main_flow_process_merge_and_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
