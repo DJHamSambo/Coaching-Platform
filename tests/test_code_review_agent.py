@@ -432,6 +432,74 @@ class TestReportGeneration:
         assert result.consensus == []
 
 
+class TestChatReviewReport:
+    def test_build_chat_report_renders_score_verdict_summary_and_files(self):
+        agent = CodeReviewAgent()
+        report = agent._build_chat_report(
+            commit="feature/x",
+            base="main",
+            timestamp="2026-01-01T00:00:00Z",
+            diff_hash="abc123",
+            files_reviewed=["agents/foo.py", "tests/test_foo.py"],
+            result_data={
+                "score": 9,
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 1,
+                "verdict": "pass",
+                "summary": "Clean, well-tested change.",
+            },
+        )
+
+        assert "chat" in report.lower()
+        assert "feature/x" in report
+        assert "abc123" in report
+        assert "9.0/10" in report
+        assert "**pass**" in report
+        assert "critical=0, high=0, medium=0, low=1" in report
+        assert "agents/foo.py" in report
+        assert "tests/test_foo.py" in report
+        assert "Clean, well-tested change." in report
+
+    def test_build_chat_report_defaults_missing_fields_safely(self):
+        agent  = CodeReviewAgent()
+        report = agent._build_chat_report(
+            commit="feature/x",
+            base="main",
+            timestamp="t",
+            diff_hash="h",
+            files_reviewed=[],
+            result_data={},
+        )
+
+        assert "0.0/10" in report
+        assert "**unknown**" in report
+        assert "no summary provided" in report
+
+    def test_write_chat_review_report_writes_to_repo_root(self, tmp_path):
+        agent = CodeReviewAgent()
+        with patch.object(
+            CodeReviewAgent,
+            "get_diff",
+            return_value=[
+                DiffFile(path="agents/foo.py", old_path=None, is_new=False, is_deleted=False, hunks=["@@ -1 +1 @@"]),
+            ],
+        ):
+            target = agent.write_chat_review_report(
+                repo_path=tmp_path,
+                commit="feature/x",
+                base="main",
+                result_data={"score": 8, "verdict": "pass", "summary": "ok"},
+            )
+
+        assert target == tmp_path / agent.REPORT_FILENAME
+        assert target.exists()
+        content = target.read_text(encoding="utf-8")
+        assert "agents/foo.py" in content
+        assert "8.0/10" in content
+
+
 # ---------------------------------------------------------------------------
 # Self-documentation
 # ---------------------------------------------------------------------------

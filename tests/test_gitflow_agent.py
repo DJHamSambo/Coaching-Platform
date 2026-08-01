@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 import unittest
@@ -224,6 +225,62 @@ class GitFlowAgentTests(unittest.TestCase):
         self.assertEqual(cleanup_plan.feature_branch, "feature/requirements-agent")
         self.assertEqual(run_git_mock.call_count, 1)
 
+    @patch("agents.gitflow_agent._CodeReviewAgent")
+    def test_run_chat_code_review_ci_refreshes_code_review_report(self, agent_cls_mock: Mock) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            result_path = repo_root / "generated" / "code-review-result.json"
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            result_data = {
+                "diff_hash": "abc123",
+                "commit": "feature/x",
+                "base": "main",
+                "score": 9,
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "verdict": "pass",
+                "summary": "Looks good.",
+            }
+            result_path.write_text(json.dumps(result_data), encoding="utf-8")
+
+            agent_instance = Mock()
+            request_path = repo_root / "generated" / "code-review-request.md"
+            agent_instance.emit_review_request.return_value = request_path
+            agent_instance.review_fingerprint.return_value = "abc123"
+            agent_cls_mock.return_value = agent_instance
+
+            agent = GitFlowAgent(repo_path=str(repo_root), pr_backend=DryRunPullRequestBackend())
+            ci_result = agent.run_chat_code_review_ci("feature/x", "main")
+
+            self.assertTrue(ci_result.passed)
+            agent_instance.write_chat_review_report.assert_called_once_with(
+                repo_path=repo_root,
+                commit="feature/x",
+                base="main",
+                result_data=result_data,
+            )
+
+    @patch("agents.gitflow_agent._CodeReviewAgent")
+    def test_run_chat_code_review_ci_skips_report_refresh_when_result_stale(self, agent_cls_mock: Mock) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            result_path = repo_root / "generated" / "code-review-result.json"
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            result_path.write_text(json.dumps({"diff_hash": "stale-hash", "score": 9, "verdict": "pass"}), encoding="utf-8")
+
+            agent_instance = Mock()
+            agent_instance.emit_review_request.return_value = repo_root / "generated" / "code-review-request.md"
+            agent_instance.review_fingerprint.return_value = "current-hash"
+            agent_cls_mock.return_value = agent_instance
+
+            agent = GitFlowAgent(repo_path=str(repo_root), pr_backend=DryRunPullRequestBackend())
+            ci_result = agent.run_chat_code_review_ci("feature/x", "main")
+
+            self.assertFalse(ci_result.passed)
+            agent_instance.write_chat_review_report.assert_not_called()
+
     @patch.object(GitFlowAgent, "run_code_review_ci")
     @patch.object(GitFlowAgent, "_dispatch_developer_fixers", return_value=True)
     @patch.object(GitFlowAgent, "_checkout_feature_branch")
@@ -332,6 +389,51 @@ class GitFlowAgentTests(unittest.TestCase):
 
         self.assertIsNotNone(plan.auto_implement)
         auto_impl_mock.assert_called_once()
+
+    @patch.object(GitFlowAgent, "_run_git")
+    @patch.object(GitFlowAgent, "_is_ancestor", return_value=True)
+    @patch("agents.gitflow_agent._remote_branch_exists", return_value=False)
+    @patch("agents.gitflow_agent._local_branch_exists", return_value=False)
+    @patch.object(GitFlowAgent, "run_code_review_ci")
+    def test_merge_feature_into_main_discards_regenerated_review_report_before_checkout(
+        self,
+        run_ci_mock: Mock,
+        _local_exists: Mock,
+        _remote_exists: Mock,
+        _is_ancestor: Mock,
+        run_git_mock: Mock,
+    ) -> None:
+        # The chat CI gate rewrites code-review-report.md as a side effect of
+        # running the review, which would otherwise dirty the tree and block
+        # the subsequent `git checkout main`. Verify the merge discards that
+        # regenerated file (via `checkout -- <report>`) before switching
+        # branches.
+        run_git_mock.return_value = Mock(returncode=0, stdout="", stderr="")
+        run_ci_mock.return_value = CIResult(
+            passed=True,
+            score=9.0,
+            models_used=["chat"],
+            critical=0,
+            high=0,
+            medium=0,
+            low=0,
+            fix_instructions_path=None,
+        )
+
+        agent = GitFlowAgent(
+            repo_path="/tmp/workspace/DJHamSambo/Coaching-Platform",
+            pr_backend=DryRunPullRequestBackend(),
+        )
+
+        agent.merge_feature_into_main(
+            feature_name="Requirements Agent",
+            execute=True,
+        )
+
+        all_calls = [call.args[0] for call in run_git_mock.call_args_list]
+        discard_index = all_calls.index(["checkout", "--", "code-review-report.md"])
+        checkout_main_index = all_calls.index(["checkout", "main"])
+        self.assertLess(discard_index, checkout_main_index)
 
     def test_end_to_end_main_flow_process_merge_and_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
