@@ -458,6 +458,22 @@ class AdoProvisionerTests(unittest.TestCase):
         provisioner = AdoProvisioner(client)
         self.assertEqual(provisioner.resolve_approver_id(None), "self-user-id")
 
+    def test_get_authenticated_user_id_uses_preview_api_version(self) -> None:
+        # Regression test: connectionData is a preview-only API; a prior bug
+        # requested api-version=6.0 without the required "-preview" suffix,
+        # which Azure DevOps rejects with HTTP 400
+        # (VssInvalidPreviewVersionException).
+        client = FakeAdoRestClient()
+        provisioner = AdoProvisioner(client)
+
+        provisioner.get_authenticated_user_id()
+
+        get_urls = [url for method, url, _ in client.calls if method == "GET"]
+        self.assertEqual(
+            get_urls,
+            ["https://dev.azure.com/myorg/_apis/connectionData?api-version=7.1-preview.1"],
+        )
+
     def test_resolve_approver_id_looks_up_email(self) -> None:
         client = FakeAdoRestClient()
         provisioner = AdoProvisioner(client)
