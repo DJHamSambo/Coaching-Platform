@@ -501,6 +501,33 @@ class AdoProvisionerTests(unittest.TestCase):
         get_urls = [url for method, url, _ in client.calls if method == "GET"]
         self.assertEqual(get_urls, ["https://dev.azure.com/myorg/_apis/projects/MyProject?api-version=7.1"])
 
+    def test_ensure_variable_group_uses_project_scoped_url(self) -> None:
+        # Regression test: Variable Groups is a project-scoped API. A prior
+        # bug called it at the organization level, which Azure DevOps
+        # rejected with HTTP 400 ("scopeId must not be Guid.Empty") because
+        # it couldn't resolve a project GUID from the URL.
+        client = FakeAdoRestClient()
+        provisioner = AdoProvisioner(client)
+
+        group_id, created = provisioner.ensure_variable_group(
+            "MyProject", "project-id-123", "coaching-platform-common", {"AZURE_LOCATION": "uksouth"}, {}
+        )
+
+        self.assertTrue(created)
+        list_calls = [url for method, url, _ in client.calls if method == "GET"]
+        create_calls = [url for method, url, body in client.calls if method == "POST"]
+        self.assertEqual(
+            list_calls,
+            [
+                "https://dev.azure.com/myorg/MyProject/_apis/distributedtask/variablegroups"
+                "?groupName=coaching-platform-common&api-version=7.1"
+            ],
+        )
+        self.assertEqual(
+            create_calls,
+            ["https://dev.azure.com/myorg/MyProject/_apis/distributedtask/variablegroups?api-version=7.1"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

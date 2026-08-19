@@ -1540,8 +1540,12 @@ class AdoProvisioner:
         secret_variables: dict[str, str],
     ) -> tuple[int, bool]:
         """Returns (variable_group_id, created)."""
+        # Variable Groups is a project-scoped API — the org-level URL used
+        # here previously left Azure DevOps unable to resolve a "scopeId"
+        # (the project's GUID) and it rejected the call with HTTP 400
+        # ("scopeId must not be Guid.Empty").
         list_url = (
-            f"https://dev.azure.com/{self._org}/_apis/distributedtask/variablegroups"
+            f"{self._project_base(project)}/_apis/distributedtask/variablegroups"
             f"?groupName={urllib.parse.quote(name)}&api-version={_ADO_API_VERSION}"
         )
         existing = self.client.get(list_url)
@@ -1550,7 +1554,7 @@ class AdoProvisioner:
 
         body_variables = {k: {"value": v, "isSecret": False} for k, v in variables.items()}
         body_variables.update({k: {"value": v, "isSecret": True} for k, v in secret_variables.items()})
-        create_url = f"https://dev.azure.com/{self._org}/_apis/distributedtask/variablegroups?api-version={_ADO_API_VERSION}"
+        create_url = f"{self._project_base(project)}/_apis/distributedtask/variablegroups?api-version={_ADO_API_VERSION}"
         created = self.client.post(create_url, {
             "type": "Vsts",
             "name": name,
