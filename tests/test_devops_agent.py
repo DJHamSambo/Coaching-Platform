@@ -470,6 +470,21 @@ class AdoProvisionerTests(unittest.TestCase):
         with self.assertRaises(AdoApiError):
             provisioner.resolve_approver_id("nobody@example.com")
 
+    def test_get_project_id_uses_organization_scoped_url_not_project_scoped(self) -> None:
+        # Regression test: "Get a project" is an organization-scoped Azure
+        # DevOps REST API (https://dev.azure.com/{org}/_apis/projects/{project}).
+        # A prior bug built this from the project-scoped base URL, producing
+        # a malformed .../{project}/_apis/projects/{project} path that Azure
+        # DevOps rejected with HTTP 401.
+        client = FakeAdoRestClient()
+        provisioner = AdoProvisioner(client)
+
+        project_id = provisioner.get_project_id("MyProject")
+
+        self.assertEqual(project_id, "project-id-123")
+        get_urls = [url for method, url, _ in client.calls if method == "GET"]
+        self.assertEqual(get_urls, ["https://dev.azure.com/myorg/_apis/projects/MyProject?api-version=7.1"])
+
 
 if __name__ == "__main__":
     unittest.main()
