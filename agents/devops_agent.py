@@ -1475,7 +1475,10 @@ class AdoProvisioner:
         return self.client.get(url)["id"]
 
     def get_authenticated_user_id(self) -> str:
-        url = f"https://dev.azure.com/{self._org}/_apis/connectionData?api-version=6.0"
+        # connectionData is a preview-only API; api-version must carry a
+        # "-preview" suffix or Azure DevOps rejects it with HTTP 400
+        # (VssInvalidPreviewVersionException).
+        url = f"https://dev.azure.com/{self._org}/_apis/connectionData?api-version={_ADO_API_VERSION}-preview.1"
         return self.client.get(url)["authenticatedUser"]["id"]
 
     def resolve_approver_id(self, approver_email: str | None) -> str:
