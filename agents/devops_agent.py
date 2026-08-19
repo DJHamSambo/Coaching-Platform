@@ -1467,7 +1467,11 @@ class AdoProvisioner:
         return f"https://dev.azure.com/{self._org}/{urllib.parse.quote(project)}"
 
     def get_project_id(self, project: str) -> str:
-        url = f"{self._project_base(project)}/_apis/projects/{urllib.parse.quote(project)}?api-version={_ADO_API_VERSION}"
+        # "Get a project" is an organization-scoped API
+        # (https://dev.azure.com/{organization}/_apis/projects/{project}),
+        # NOT project-scoped — using _project_base() here would produce a
+        # malformed .../{project}/_apis/projects/{project} URL.
+        url = f"https://dev.azure.com/{self._org}/_apis/projects/{urllib.parse.quote(project)}?api-version={_ADO_API_VERSION}"
         return self.client.get(url)["id"]
 
     def get_authenticated_user_id(self) -> str:
