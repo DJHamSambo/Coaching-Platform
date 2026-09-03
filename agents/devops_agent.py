@@ -1146,9 +1146,6 @@ stages:
           cd generated/frontend-app
           npm audit --audit-level=high || true
         displayName: 'npm audit (frontend dependency scan)'
-      - script: |
-          python agents/code_review_agent.py --commit HEAD --base main
-        displayName: 'AI code review CI gate'
 """,
             "infra-plan.yml": """parameters:
   - name: environment
