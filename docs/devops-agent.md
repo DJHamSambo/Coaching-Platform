@@ -97,8 +97,9 @@ implementing:
 
 1. **Build & test** — backend (`manage.py test`) and frontend (`npm test`,
    `npm run build`) in parallel jobs.
-2. **Security scan** — `bandit` (Python), `npm audit` (frontend deps), and
-   the repo's own `code_review_agent.py` as an AI code-review CI gate.
+2. **Security scan** — `bandit` (Python) and `npm audit` (frontend deps).
+   Code review happens interactively before merge (chat CI gate), so the
+   pipeline no longer re-runs `code_review_agent.py`.
 3. **Infra plan** — `az deployment group what-if` for both environments.
 4. **Cost gate** — runs `devops_agent.py plan --fail-over-budget` for each
    environment; fails the pipeline if projected spend exceeds the configured
