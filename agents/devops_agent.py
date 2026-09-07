@@ -1169,6 +1169,10 @@ jobs:
                 echo "##vso[task.logissue type=error]Secret variable 'postgresAdminPassword' is missing from the coaching-platform-common variable group"
                 exit 1;;
             esac
+            az group create \\
+              --name rg-coaching-platform-${{ parameters.environment }} \\
+              --location "$(AZURE_LOCATION)" \\
+              --output none
             az deployment group what-if \\
               --resource-group rg-coaching-platform-${{ parameters.environment }} \\
               --template-file infra/azure/main.bicep \\
@@ -1192,6 +1196,9 @@ jobs:
     type: string
 
 steps:
+  # Deployment jobs do not check out the repository by default (regular jobs
+  # do), so fetch it explicitly before referencing files like main.bicep.
+  - checkout: self
   - task: AzureCLI@2
     inputs:
       azureSubscription: 'azure-service-connection'
@@ -1203,6 +1210,10 @@ steps:
             echo "##vso[task.logissue type=error]Secret variable 'postgresAdminPassword' is missing from the coaching-platform-common variable group"
             exit 1;;
         esac
+        az group create \\
+          --name rg-coaching-platform-${{ parameters.environment }} \\
+          --location "$(AZURE_LOCATION)" \\
+          --output none
         az deployment group create \\
           --resource-group rg-coaching-platform-${{ parameters.environment }} \\
           --template-file infra/azure/main.bicep \\
