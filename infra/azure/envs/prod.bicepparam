@@ -3,7 +3,7 @@
 using '../main.bicep'
 
 param environmentName = 'prod'
-param location = 'uksouth'
+param location = 'australiaeast'
 param appName = 'coaching-platform'
 param monthlyBudgetUsd = 142
 param costAlertEmail = 'REPLACE_ME@example.com'
