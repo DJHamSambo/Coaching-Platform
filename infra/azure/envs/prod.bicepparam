@@ -7,5 +7,7 @@ param location = 'uksouth'
 param appName = 'coaching-platform'
 param monthlyBudgetUsd = 142
 param costAlertEmail = 'REPLACE_ME@example.com'
-// postgresAdminPassword must be supplied at deploy time via --parameters or a pipeline secret variable,
+// Supplied at compile time from the POSTGRES_ADMIN_PASSWORD environment variable
+// (the pipeline maps it from the secret variable 'postgresAdminPassword');
 // never committed to source control.
+param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD')

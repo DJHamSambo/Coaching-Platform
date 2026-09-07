@@ -727,8 +727,10 @@ param location = '{env_plan.region}'
 param appName = '{plan.app_name}'
 param monthlyBudgetUsd = {budget_cap}
 param costAlertEmail = 'REPLACE_ME@example.com'
-// postgresAdminPassword must be supplied at deploy time via --parameters or a pipeline secret variable,
+// Supplied at compile time from the POSTGRES_ADMIN_PASSWORD environment variable
+// (the pipeline maps it from the secret variable 'postgresAdminPassword');
 // never committed to source control.
+param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD')
 """
 
     def _module_files(self) -> dict[str, str]:
@@ -1162,11 +1164,17 @@ jobs:
           scriptType: bash
           scriptLocation: inlineScript
           inlineScript: |
+            case "$POSTGRES_ADMIN_PASSWORD" in
+              ''|'$('*)
+                echo "##vso[task.logissue type=error]Secret variable 'postgresAdminPassword' is missing from the coaching-platform-common variable group"
+                exit 1;;
+            esac
             az deployment group what-if \\
               --resource-group rg-coaching-platform-${{ parameters.environment }} \\
               --template-file infra/azure/main.bicep \\
-              --parameters infra/azure/envs/${{ parameters.environment }}.bicepparam \\
-              --parameters postgresAdminPassword="$(postgresAdminPassword)"
+              --parameters infra/azure/envs/${{ parameters.environment }}.bicepparam
+        env:
+          POSTGRES_ADMIN_PASSWORD: $(postgresAdminPassword)
         displayName: 'az deployment group what-if'
 """,
             "cost-gate.yml": """jobs:
@@ -1190,11 +1198,17 @@ steps:
       scriptType: bash
       scriptLocation: inlineScript
       inlineScript: |
+        case "$POSTGRES_ADMIN_PASSWORD" in
+          ''|'$('*)
+            echo "##vso[task.logissue type=error]Secret variable 'postgresAdminPassword' is missing from the coaching-platform-common variable group"
+            exit 1;;
+        esac
         az deployment group create \\
           --resource-group rg-coaching-platform-${{ parameters.environment }} \\
           --template-file infra/azure/main.bicep \\
-          --parameters infra/azure/envs/${{ parameters.environment }}.bicepparam \\
-          --parameters postgresAdminPassword="$(postgresAdminPassword)"
+          --parameters infra/azure/envs/${{ parameters.environment }}.bicepparam
+    env:
+      POSTGRES_ADMIN_PASSWORD: $(postgresAdminPassword)
     displayName: 'Deploy infrastructure (Bicep)'
   - task: AzureWebApp@1
     inputs:
