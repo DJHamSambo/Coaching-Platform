@@ -13,9 +13,15 @@ jobs:
           scriptType: bash
           scriptLocation: inlineScript
           inlineScript: |
+            case "$POSTGRES_ADMIN_PASSWORD" in
+              ''|'$('*)
+                echo "##vso[task.logissue type=error]Secret variable 'postgresAdminPassword' is missing from the coaching-platform-common variable group"
+                exit 1;;
+            esac
             az deployment group what-if \
               --resource-group rg-coaching-platform-${{ parameters.environment }} \
               --template-file infra/azure/main.bicep \
-              --parameters infra/azure/envs/${{ parameters.environment }}.bicepparam \
-              --parameters postgresAdminPassword="$(postgresAdminPassword)"
+              --parameters infra/azure/envs/${{ parameters.environment }}.bicepparam
+        env:
+          POSTGRES_ADMIN_PASSWORD: $(postgresAdminPassword)
         displayName: 'az deployment group what-if'

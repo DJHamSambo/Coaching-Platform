@@ -190,7 +190,7 @@ class BicepGeneratorTests(unittest.TestCase):
             self.assertTrue((output_dir / "envs" / "prod.bicepparam").exists())
             self.assertEqual(len(written), len(set(written)))
 
-    def test_param_file_does_not_contain_secret_value(self) -> None:
+    def test_param_file_reads_postgres_password_from_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo_root = Path(temp_dir)
             _write_backend_and_frontend(repo_root)
@@ -200,7 +200,13 @@ class BicepGeneratorTests(unittest.TestCase):
             BicepGenerator().write(plan, output_dir)
 
             param_content = (output_dir / "envs" / "nonprod.bicepparam").read_text(encoding="utf-8")
-            self.assertNotIn("postgresAdminPassword =", param_content)
+            # The password must come from the environment at compile time --
+            # never a literal value committed to source control.
+            self.assertIn(
+                "param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD')",
+                param_content,
+            )
+            self.assertNotIn("postgresAdminPassword = '", param_content)
 
 
 class AzurePipelineGeneratorTests(unittest.TestCase):
