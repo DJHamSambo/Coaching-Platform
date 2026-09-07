@@ -67,7 +67,11 @@ from pathlib import Path
 ENVIRONMENTS = ("nonprod", "prod")
 
 _DEFAULT_APP_NAME = "coaching-platform"
-_DEFAULT_REGION = "uksouth"
+# Azure Static Web Apps are only deployable to a handful of regions
+# (centralus, eastus2, westus2, westeurope, eastasia), so main.bicep gives the
+# SWA its own staticWebAppLocation parameter (default eastasia) while
+# everything else uses the primary region below.
+_DEFAULT_REGION = "australiaeast"
 
 _STATE_REL_PATH = "generated/devops-agent-state.json"
 _PLAN_REPORT_REL_PATH = "generated/devops-agent-report.md"
@@ -590,7 +594,10 @@ targetScope = 'resourceGroup'
 param environmentName string
 
 @description('Azure region for all resources')
-param location string = 'uksouth'
+param location string = 'australiaeast'
+
+@description('Region for the Static Web App -- Microsoft.Web/staticSites is only available in centralus, eastus2, westus2, westeurope and eastasia')
+param staticWebAppLocation string = 'eastasia'
 
 @description('Application name used as a resource naming prefix')
 param appName string = 'coaching-platform'
@@ -684,7 +691,7 @@ module staticWebApp 'modules/staticWebApp.bicep' = {
   params: {
     appName: appName
     environmentName: environmentName
-    location: location
+    location: staticWebAppLocation
     tags: tags
   }
 }
