@@ -599,6 +599,9 @@ param location string = 'australiaeast'
 @description('Region for the Static Web App -- Microsoft.Web/staticSites is only available in centralus, eastus2, westus2, westeurope and eastasia')
 param staticWebAppLocation string = 'eastasia'
 
+@description('Region for the auto-shutdown Automation account -- Free Trial/Student subscriptions can only create them in eastus, eastus2, westus, northeurope, southeastasia and japanwest')
+param automationLocation string = 'southeastasia'
+
 @description('Application name used as a resource naming prefix')
 param appName string = 'coaching-platform'
 
@@ -711,7 +714,7 @@ module autoShutdown 'modules/autoShutdown.bicep' = if (environmentName == 'nonpr
   params: {
     appName: appName
     environmentName: environmentName
-    location: location
+    location: automationLocation
     tags: tags
     webAppName: backendApp.outputs.webAppName
     postgresServerName: postgres.outputs.serverName
