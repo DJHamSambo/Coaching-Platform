@@ -907,12 +907,10 @@ resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
     name: environmentName == 'prod' ? 'Standard' : 'Free'
     tier: environmentName == 'prod' ? 'Standard' : 'Free'
   }
-  properties: {
-    buildProperties: {
-      appLocation: '/generated/frontend-app'
-      outputLocation: 'dist'
-    }
-  }
+  // No buildProperties: they only apply to repo-linked Static Web Apps and
+  // make ARM preflight/what-if fail with an internal 404 on updates. The
+  // frontend is deployed by the pipeline's AzureStaticWebApp task instead.
+  properties: {}
 }
 
 output defaultHostName string = staticWebApp.properties.defaultHostname
@@ -1237,10 +1235,24 @@ steps:
       appName: 'app-coaching-platform-backend-${{ parameters.environment }}'
       package: 'generated/backend-app'
     displayName: 'Deploy backend app code'
+  # AzureStaticWebApp@0 authenticates with a deployment token, not the ARM
+  # service connection, so fetch the token from the SWA first.
+  - task: AzureCLI@2
+    inputs:
+      azureSubscription: 'azure-service-connection'
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        SWA_TOKEN=$(az staticwebapp secrets list \\
+          --name swa-coaching-platform-${{ parameters.environment }} \\
+          --query properties.apiKey --output tsv)
+        echo "##vso[task.setvariable variable=SWA_DEPLOYMENT_TOKEN;issecret=true]$SWA_TOKEN"
+    displayName: 'Fetch Static Web App deployment token'
   - task: AzureStaticWebApp@0
     inputs:
       app_location: 'generated/frontend-app'
       output_location: 'dist'
+      azure_static_web_apps_api_token: $(SWA_DEPLOYMENT_TOKEN)
     displayName: 'Deploy frontend app code'
 """,
         }
