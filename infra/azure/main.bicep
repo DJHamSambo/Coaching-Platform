@@ -8,8 +8,8 @@ param environmentName string
 @description('Azure region for all resources')
 param location string = 'australiaeast'
 
-@description('Region for the Static Web App -- Microsoft.Web/staticSites is only available in centralus, eastus2, westus2, westeurope and eastasia')
-param staticWebAppLocation string = 'eastasia'
+@description('Region for the Static Web App -- Microsoft.Web/staticSites is only available in centralus, eastus2, westus2, westeurope and eastasia; eastasia preflight rejects new sites on this subscription, so westus2 is used')
+param staticWebAppLocation string = 'westus2'
 
 @description('Region for the auto-shutdown Automation account -- Free Trial/Student subscriptions can only create them in eastus, eastus2, westus, northeurope, southeastasia and japanwest')
 param automationLocation string = 'southeastasia'
