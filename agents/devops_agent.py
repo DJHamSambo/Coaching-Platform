@@ -618,6 +618,10 @@ param postgresAdminLogin string = 'coachadmin'
 @secure()
 param postgresAdminPassword string
 
+@description('Initial password for the seeded Django staff user (change forced on first login)')
+@secure()
+param djangoAdminPassword string
+
 var tags = {
   application: appName
   environment: environmentName
@@ -686,6 +690,12 @@ module backendApp 'modules/appService.bicep' = {
     tags: tags
     appInsightsConnectionString: appInsights.outputs.connectionString
     keyVaultUri: keyVault.outputs.vaultUri
+    staticWebAppHostname: staticWebApp.outputs.defaultHostName
+    postgresHost: postgres.outputs.fullyQualifiedDomainName
+    postgresDatabase: postgres.outputs.databaseName
+    postgresAdminLogin: postgresAdminLogin
+    postgresAdminPassword: postgresAdminPassword
+    djangoAdminPassword: djangoAdminPassword
   }
 }
 
@@ -741,6 +751,7 @@ param costAlertEmail = 'REPLACE_ME@example.com'
 // (the pipeline maps it from the secret variable 'postgresAdminPassword');
 // never committed to source control.
 param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD')
+param djangoAdminPassword = readEnvironmentVariable('DJANGO_ADMIN_PASSWORD')
 """
 
     def _module_files(self) -> dict[str, str]:
@@ -852,7 +863,26 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview'
   }
 }
 
+resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-06-01-preview' = {
+  parent: postgres
+  name: 'coaching'
+}
+
+// Lets Azure services (the backend App Service) reach the server. Flexible
+// Server child resources cannot be created concurrently, hence dependsOn.
+resource allowAzureServices 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-06-01-preview' = {
+  parent: postgres
+  name: 'AllowAllAzureServicesAndResourcesWithinAzureIps'
+  properties: {
+    startIpAddress: '0.0.0.0'
+    endIpAddress: '0.0.0.0'
+  }
+  dependsOn: [database]
+}
+
 output serverName string = postgres.name
+output fullyQualifiedDomainName string = postgres.properties.fullyQualifiedDomainName
+output databaseName string = database.name
 """,
             "appService.bicep": """param appName string
 param environmentName string
@@ -860,6 +890,14 @@ param location string
 param tags object
 param appInsightsConnectionString string
 param keyVaultUri string
+param staticWebAppHostname string
+param postgresHost string
+param postgresDatabase string
+param postgresAdminLogin string
+@secure()
+param postgresAdminPassword string
+@secure()
+param djangoAdminPassword string
 
 resource plan 'Microsoft.Web/serverfarms@2023-01-01' = {
   name: 'asp-${appName}-backend-${environmentName}'
@@ -881,10 +919,20 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
       linuxFxVersion: 'PYTHON|3.12'
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
+      // Apply migrations and seed the initial staff user before serving.
+      appCommandLine: 'python manage.py migrate --noinput && python manage.py ensure_admin && gunicorn --bind=0.0.0.0:8000 --timeout 600 coaching_backend.wsgi'
       appSettings: [
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
         { name: 'KEY_VAULT_URI', value: keyVaultUri }
         { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true' }
+        { name: 'DJANGO_DEBUG', value: 'false' }
+        { name: 'CORS_ALLOWED_ORIGINS', value: 'https://${staticWebAppHostname}' }
+        { name: 'POSTGRES_HOST', value: postgresHost }
+        { name: 'POSTGRES_DB', value: postgresDatabase }
+        { name: 'POSTGRES_USER', value: postgresAdminLogin }
+        { name: 'POSTGRES_PASSWORD', value: postgresAdminPassword }
+        { name: 'DJANGO_ADMIN_USERNAME', value: 'admin' }
+        { name: 'DJANGO_ADMIN_PASSWORD', value: djangoAdminPassword }
       ]
     }
   }
@@ -1181,6 +1229,11 @@ jobs:
                 echo "##vso[task.logissue type=error]Secret variable 'postgresAdminPassword' is missing from the coaching-platform-common variable group"
                 exit 1;;
             esac
+            case "$DJANGO_ADMIN_PASSWORD" in
+              ''|'$('*)
+                echo "##vso[task.logissue type=error]Secret variable 'djangoAdminPassword' is missing from the coaching-platform-common variable group"
+                exit 1;;
+            esac
             az group create \\
               --name rg-coaching-platform-${{ parameters.environment }} \\
               --location "$(AZURE_LOCATION)" \\
@@ -1191,6 +1244,7 @@ jobs:
               --parameters infra/azure/envs/${{ parameters.environment }}.bicepparam
         env:
           POSTGRES_ADMIN_PASSWORD: $(postgresAdminPassword)
+          DJANGO_ADMIN_PASSWORD: $(djangoAdminPassword)
         displayName: 'az deployment group what-if'
 """,
             "cost-gate.yml": """jobs:
@@ -1222,6 +1276,11 @@ steps:
             echo "##vso[task.logissue type=error]Secret variable 'postgresAdminPassword' is missing from the coaching-platform-common variable group"
             exit 1;;
         esac
+        case "$DJANGO_ADMIN_PASSWORD" in
+          ''|'$('*)
+            echo "##vso[task.logissue type=error]Secret variable 'djangoAdminPassword' is missing from the coaching-platform-common variable group"
+            exit 1;;
+        esac
         az group create \\
           --name rg-coaching-platform-${{ parameters.environment }} \\
           --location "$(AZURE_LOCATION)" \\
@@ -1232,6 +1291,7 @@ steps:
           --parameters infra/azure/envs/${{ parameters.environment }}.bicepparam
     env:
       POSTGRES_ADMIN_PASSWORD: $(postgresAdminPassword)
+      DJANGO_ADMIN_PASSWORD: $(djangoAdminPassword)
     displayName: 'Deploy infrastructure (Bicep)'
   - task: AzureWebApp@1
     inputs:
@@ -1257,6 +1317,10 @@ steps:
       app_location: 'generated/frontend-app'
       output_location: 'dist'
       azure_static_web_apps_api_token: $(SWA_DEPLOYMENT_TOKEN)
+    env:
+      # Baked into the Vite bundle at build time so the frontend calls the
+      # deployed backend instead of localhost.
+      VITE_API_BASE_URL: https://app-coaching-platform-backend-${{ parameters.environment }}.azurewebsites.net
     displayName: 'Deploy frontend app code'
 """,
         }

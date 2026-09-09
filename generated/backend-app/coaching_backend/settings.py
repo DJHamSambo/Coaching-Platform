@@ -28,7 +28,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY") or (
     "dev-insecure-6f4c2b8e1a9d7c035e82f1a4b6d09c7e3f1a5b8c2d4e6f70-change-me"
 )
-DEBUG = True
+DEBUG = _env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = ["*"]
 
 INSTALLED_APPS = [
@@ -46,16 +46,36 @@ MIDDLEWARE = [
 ]
 
 CORS_ALLOWED_ORIGINS = ["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176", "http://localhost:4173"]
+# Deployed frontends (e.g. the Azure Static Web App origin) are supplied via a
+# comma-separated CORS_ALLOWED_ORIGINS environment variable.
+_extra_cors_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+CORS_ALLOWED_ORIGINS += [o.strip() for o in _extra_cors_origins.split(",") if o.strip()]
 
 ROOT_URLCONF = "coaching_backend.urls"
 WSGI_APPLICATION = "coaching_backend.wsgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+# Use PostgreSQL when POSTGRES_HOST is set (e.g. on Azure App Service, wired
+# to the Flexible Server by the infrastructure pipeline); otherwise fall back
+# to the local SQLite database for development and tests.
+if os.environ.get("POSTGRES_HOST"):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("POSTGRES_DB", "coaching"),
+            "USER": os.environ["POSTGRES_USER"],
+            "PASSWORD": os.environ["POSTGRES_PASSWORD"],
+            "HOST": os.environ["POSTGRES_HOST"],
+            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            "OPTIONS": {"sslmode": "require"},
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [

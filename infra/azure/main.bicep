@@ -30,6 +30,10 @@ param postgresAdminLogin string = 'coachadmin'
 @secure()
 param postgresAdminPassword string
 
+@description('Initial password for the seeded Django staff user (change forced on first login)')
+@secure()
+param djangoAdminPassword string
+
 var tags = {
   application: appName
   environment: environmentName
@@ -98,6 +102,12 @@ module backendApp 'modules/appService.bicep' = {
     tags: tags
     appInsightsConnectionString: appInsights.outputs.connectionString
     keyVaultUri: keyVault.outputs.vaultUri
+    staticWebAppHostname: staticWebApp.outputs.defaultHostName
+    postgresHost: postgres.outputs.fullyQualifiedDomainName
+    postgresDatabase: postgres.outputs.databaseName
+    postgresAdminLogin: postgresAdminLogin
+    postgresAdminPassword: postgresAdminPassword
+    djangoAdminPassword: djangoAdminPassword
   }
 }
 
