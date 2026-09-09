@@ -976,6 +976,10 @@ param location string
 param tags object
 param webAppName string
 param postgresServerName string
+// utcNow() is only allowed as a parameter default. Azure rejects schedule
+// start times less than 5 minutes in the future, so the nightly-stop schedule
+// starts tomorrow at 19:00 UTC rather than using a fixed date.
+param deploymentDate string = utcNow('yyyy-MM-dd')
 
 // Stops non-prod compute outside business hours (19:00-07:00 + weekends) to
 // avoid paying for idle environments. Start-up is via the 'spin-up' CLI
@@ -1008,7 +1012,7 @@ resource stopSchedule 'Microsoft.Automation/automationAccounts/schedules@2023-11
   properties: {
     frequency: 'Day'
     interval: 1
-    startTime: '2025-01-01T19:00:00+00:00'
+    startTime: dateTimeAdd('${deploymentDate}T19:00:00Z', 'P1D')
   }
 }
 """,
