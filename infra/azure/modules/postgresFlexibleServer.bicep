@@ -27,4 +27,23 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2023-06-01-preview'
   }
 }
 
+resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2023-06-01-preview' = {
+  parent: postgres
+  name: 'coaching'
+}
+
+// Lets Azure services (the backend App Service) reach the server. Flexible
+// Server child resources cannot be created concurrently, hence dependsOn.
+resource allowAzureServices 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2023-06-01-preview' = {
+  parent: postgres
+  name: 'AllowAllAzureServicesAndResourcesWithinAzureIps'
+  properties: {
+    startIpAddress: '0.0.0.0'
+    endIpAddress: '0.0.0.0'
+  }
+  dependsOn: [database]
+}
+
 output serverName string = postgres.name
+output fullyQualifiedDomainName string = postgres.properties.fullyQualifiedDomainName
+output databaseName string = database.name

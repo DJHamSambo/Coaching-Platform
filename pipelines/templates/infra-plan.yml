@@ -18,6 +18,11 @@ jobs:
                 echo "##vso[task.logissue type=error]Secret variable 'postgresAdminPassword' is missing from the coaching-platform-common variable group"
                 exit 1;;
             esac
+            case "$DJANGO_ADMIN_PASSWORD" in
+              ''|'$('*)
+                echo "##vso[task.logissue type=error]Secret variable 'djangoAdminPassword' is missing from the coaching-platform-common variable group"
+                exit 1;;
+            esac
             az group create \
               --name rg-coaching-platform-${{ parameters.environment }} \
               --location "$(AZURE_LOCATION)" \
@@ -28,4 +33,5 @@ jobs:
               --parameters infra/azure/envs/${{ parameters.environment }}.bicepparam
         env:
           POSTGRES_ADMIN_PASSWORD: $(postgresAdminPassword)
+          DJANGO_ADMIN_PASSWORD: $(djangoAdminPassword)
         displayName: 'az deployment group what-if'

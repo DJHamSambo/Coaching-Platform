@@ -17,6 +17,11 @@ steps:
             echo "##vso[task.logissue type=error]Secret variable 'postgresAdminPassword' is missing from the coaching-platform-common variable group"
             exit 1;;
         esac
+        case "$DJANGO_ADMIN_PASSWORD" in
+          ''|'$('*)
+            echo "##vso[task.logissue type=error]Secret variable 'djangoAdminPassword' is missing from the coaching-platform-common variable group"
+            exit 1;;
+        esac
         az group create \
           --name rg-coaching-platform-${{ parameters.environment }} \
           --location "$(AZURE_LOCATION)" \
@@ -27,6 +32,7 @@ steps:
           --parameters infra/azure/envs/${{ parameters.environment }}.bicepparam
     env:
       POSTGRES_ADMIN_PASSWORD: $(postgresAdminPassword)
+      DJANGO_ADMIN_PASSWORD: $(djangoAdminPassword)
     displayName: 'Deploy infrastructure (Bicep)'
   - task: AzureWebApp@1
     inputs:
@@ -52,4 +58,8 @@ steps:
       app_location: 'generated/frontend-app'
       output_location: 'dist'
       azure_static_web_apps_api_token: $(SWA_DEPLOYMENT_TOKEN)
+    env:
+      # Baked into the Vite bundle at build time so the frontend calls the
+      # deployed backend instead of localhost.
+      VITE_API_BASE_URL: https://app-coaching-platform-backend-${{ parameters.environment }}.azurewebsites.net
     displayName: 'Deploy frontend app code'

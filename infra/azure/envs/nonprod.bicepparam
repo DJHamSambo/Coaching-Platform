@@ -11,3 +11,4 @@ param costAlertEmail = 'REPLACE_ME@example.com'
 // (the pipeline maps it from the secret variable 'postgresAdminPassword');
 // never committed to source control.
 param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD')
+param djangoAdminPassword = readEnvironmentVariable('DJANGO_ADMIN_PASSWORD')

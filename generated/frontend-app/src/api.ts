@@ -1,4 +1,6 @@
-// API client — talks to the Django backend at http://localhost:8000
+// API client — talks to the Django backend. The base URL comes from the
+// VITE_API_BASE_URL build-time variable (set by the deployment pipeline);
+// it falls back to the local dev server when unset.
 // All calls attach the stored JWT token automatically.
 
 import type {
@@ -26,7 +28,7 @@ import type {
 import { NOTIFICATION_TARGET_TYPES } from './types';
 import { GENERIC_API_ERROR_MESSAGE, SESSION_EXPIRED_MESSAGE } from './constants/messages';
 
-const BASE_URL = 'http://127.0.0.1:8000';
+const BASE_URL: string = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 const TOKEN_KEY = 'coaching_jwt';
 const USERNAME_KEY = 'coaching_username';
 
