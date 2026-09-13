@@ -746,7 +746,7 @@ param environmentName = '{env_plan.environment}'
 param location = '{env_plan.region}'
 param appName = '{plan.app_name}'
 param monthlyBudgetUsd = {budget_cap}
-param costAlertEmail = 'REPLACE_ME@example.com'
+param costAlertEmail = 'hamish.armstrong88@gmail.com'
 // Supplied at compile time from the POSTGRES_ADMIN_PASSWORD environment variable
 // (the pipeline maps it from the secret variable 'postgresAdminPassword');
 // never committed to source control.
