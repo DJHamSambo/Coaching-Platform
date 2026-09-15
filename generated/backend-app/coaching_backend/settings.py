@@ -31,6 +31,11 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY") or (
 DEBUG = _env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = ["*"]
 
+# App Service terminates TLS at its front end and forwards plain HTTP with
+# X-Forwarded-Proto; trust it so build_absolute_uri() returns https URLs
+# (avatar links would otherwise be blocked as mixed content).
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -94,9 +99,20 @@ REST_FRAMEWORK = {
     ],
 }
 
-# Uploaded documents (coaching resources)
+# Uploaded documents (coaching resources). On Azure App Service MEDIA_ROOT is
+# pointed at /home/media (persistent storage) via an app setting; the default
+# keeps uploads next to the code for local development.
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", BASE_DIR / "media"))
+
+# Keep users signed in for a working day; the default 5-minute access token
+# logged people out mid-session because the SPA does not refresh tokens.
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=8),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+}
 
 # Password policy (current best-practice length + complexity)
 AUTH_PASSWORD_VALIDATORS = [

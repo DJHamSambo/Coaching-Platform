@@ -1,6 +1,6 @@
 from django.conf import settings
-from django.conf.urls.static import static
-from django.urls import path
+from django.urls import path, re_path
+from django.views.static import serve
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from api.auth_views import register, me, profile, health, change_password, EmailOrUsernameTokenObtainPairView
@@ -85,4 +85,17 @@ urlpatterns = [
 ]
 
 if settings.DEBUG:
+    from django.conf.urls.static import static
+
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+else:
+    # Serve uploaded media (avatars, resources) in production too. The app is
+    # the only origin for these files; uploads are validated on the way in.
+    urlpatterns += [
+        re_path(
+            r"^media/(?P<path>.*)$",
+            serve,
+            {"document_root": settings.MEDIA_ROOT},
+            name="media",
+        ),
+    ]

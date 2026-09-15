@@ -933,6 +933,8 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'POSTGRES_PASSWORD', value: postgresAdminPassword }
         { name: 'DJANGO_ADMIN_USERNAME', value: 'admin' }
         { name: 'DJANGO_ADMIN_PASSWORD', value: djangoAdminPassword }
+        // /home is App Service persistent storage; uploads survive restarts.
+        { name: 'MEDIA_ROOT', value: '/home/media' }
       ]
     }
   }

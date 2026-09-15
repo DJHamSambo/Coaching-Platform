@@ -17,7 +17,9 @@ class CoachesListView(generics.ListCreateAPIView):
     permission_classes = [IsAdmin]
 
     def get_queryset(self):
-        return User.objects.order_by("username")
+        # Users provisioned as coachee logins are not coaches — keep them out
+        # of the admin coach list.
+        return User.objects.exclude(coachee_profiles__isnull=False).order_by("username")
 
 
 class CoachesDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -25,7 +27,7 @@ class CoachesDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAdmin]
 
     def get_queryset(self):
-        return User.objects.order_by("username")
+        return User.objects.exclude(coachee_profiles__isnull=False).order_by("username")
 
 
 class AdminCoacheesListView(generics.ListCreateAPIView):
@@ -56,4 +58,8 @@ class CoachDirectoryListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return User.objects.filter(is_active=True, is_staff=False).order_by("username")
+        return (
+            User.objects.filter(is_active=True, is_staff=False)
+            .exclude(coachee_profiles__isnull=False)
+            .order_by("username")
+        )
