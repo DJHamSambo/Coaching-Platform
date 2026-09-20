@@ -78,6 +78,17 @@ _PLAN_REPORT_REL_PATH = "generated/devops-agent-report.md"
 _INFRA_REL_DIR = "infra/azure"
 _PIPELINES_REL_DIR = "pipelines"
 
+# Secret variables the deploy/what-if pipelines read from the variable group and
+# pass to Bicep, which writes them into Key Vault. Keep in step with the
+# require_secret guards in deploy.yml/infra-plan.yml and the .bicepparam file;
+# a missing one fails the pipeline rather than deploying a misconfigured app.
+PIPELINE_SECRET_VARIABLES = (
+    "postgresAdminPassword",
+    "djangoAdminPassword",
+    "djangoSecretKey",
+    "resendApiKey",
+)
+
 # Approximate USD/month retail rates (Pay-As-You-Go, UK South / East US class
 # pricing). These are ESTIMATES for planning purposes only -- always confirm
 # with the Azure Pricing Calculator / Cost Management before relying on them.
@@ -622,6 +633,17 @@ param postgresAdminPassword string
 @secure()
 param djangoAdminPassword string
 
+@description('Django SECRET_KEY used to sign sessions and JWTs; without it the app falls back to the insecure dev key in settings.py')
+@secure()
+param djangoSecretKey string
+
+@description('Resend API key used to deliver account-activation email; without it Django silently falls back to the console backend')
+@secure()
+param resendApiKey string
+
+@description('From address for outbound email -- the domain must be verified in Resend or messages are rejected')
+param defaultFromEmail string = 'Coaching Platform <noreply@successby1000cuts.com>'
+
 var tags = {
   application: appName
   environment: environmentName
@@ -656,6 +678,10 @@ module keyVault 'modules/keyVault.bicep' = {
     environmentName: environmentName
     location: location
     tags: tags
+    postgresAdminPassword: postgresAdminPassword
+    djangoAdminPassword: djangoAdminPassword
+    djangoSecretKey: djangoSecretKey
+    resendApiKey: resendApiKey
   }
 }
 
@@ -688,15 +714,32 @@ module backendApp 'modules/appService.bicep' = {
     environmentName: environmentName
     location: location
     tags: tags
+  }
+}
+
+// Must land before appSettings: the site cannot resolve @Microsoft.KeyVault()
+// references until its identity holds the Key Vault Secrets User role.
+module keyVaultAccess 'modules/keyVaultAccess.bicep' = {
+  name: 'keyVaultAccess'
+  params: {
+    keyVaultName: keyVault.outputs.vaultName
+    principalId: backendApp.outputs.principalId
+  }
+}
+
+module backendAppSettings 'modules/appServiceSettings.bicep' = {
+  name: 'backendAppSettings'
+  params: {
+    webAppName: backendApp.outputs.webAppName
     appInsightsConnectionString: appInsights.outputs.connectionString
     keyVaultUri: keyVault.outputs.vaultUri
     staticWebAppHostname: staticWebApp.outputs.defaultHostName
     postgresHost: postgres.outputs.fullyQualifiedDomainName
     postgresDatabase: postgres.outputs.databaseName
     postgresAdminLogin: postgresAdminLogin
-    postgresAdminPassword: postgresAdminPassword
-    djangoAdminPassword: djangoAdminPassword
+    defaultFromEmail: defaultFromEmail
   }
+  dependsOn: [keyVaultAccess]
 }
 
 module staticWebApp 'modules/staticWebApp.bicep' = {
@@ -747,11 +790,14 @@ param location = '{env_plan.region}'
 param appName = '{plan.app_name}'
 param monthlyBudgetUsd = {budget_cap}
 param costAlertEmail = 'hamish.armstrong88@gmail.com'
-// Supplied at compile time from the POSTGRES_ADMIN_PASSWORD environment variable
-// (the pipeline maps it from the secret variable 'postgresAdminPassword');
-// never committed to source control.
+// Supplied at compile time from environment variables (the pipeline maps each
+// one from a secret variable in the 'coaching-platform-common' variable group);
+// never committed to source control. These are written into Key Vault by
+// main.bicep and reach the app as @Microsoft.KeyVault() references.
 param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD')
 param djangoAdminPassword = readEnvironmentVariable('DJANGO_ADMIN_PASSWORD')
+param djangoSecretKey = readEnvironmentVariable('DJANGO_SECRET_KEY')
+param resendApiKey = readEnvironmentVariable('RESEND_API_KEY')
 """
 
     def _module_files(self) -> dict[str, str]:
@@ -797,6 +843,14 @@ output connectionString string = appInsights.properties.ConnectionString
 param environmentName string
 param location string
 param tags object
+@secure()
+param postgresAdminPassword string
+@secure()
+param djangoAdminPassword string
+@secure()
+param djangoSecretKey string
+@secure()
+param resendApiKey string
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: take('kv-${appName}-${environmentName}', 24)
@@ -812,7 +866,39 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   }
 }
 
+// The vault is the system of record for every application secret. The backend
+// reads these through @Microsoft.KeyVault() app-setting references (see
+// appServiceSettings.bicep) so no secret value is ever stored in site config.
+resource postgresAdminPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'postgres-admin-password'
+  properties: { value: postgresAdminPassword }
+}
+
+resource djangoAdminPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'django-admin-password'
+  properties: { value: djangoAdminPassword }
+}
+
+// Signs Django sessions and JWTs. Without it the app falls back to the dev key
+// committed in settings.py, i.e. tokens signed with a publicly known secret.
+resource djangoSecretKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'django-secret-key'
+  properties: { value: djangoSecretKey }
+}
+
+// Resend API key. Without it Django silently selects the console email backend
+// and account-activation emails are written to the log instead of delivered.
+resource resendApiKeySecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'resend-api-key'
+  properties: { value: resendApiKey }
+}
+
 output vaultUri string = keyVault.properties.vaultUri
+output vaultName string = keyVault.name
 """,
             "storageAccount.bicep": """param appName string
 param environmentName string
@@ -888,16 +974,6 @@ output databaseName string = database.name
 param environmentName string
 param location string
 param tags object
-param appInsightsConnectionString string
-param keyVaultUri string
-param staticWebAppHostname string
-param postgresHost string
-param postgresDatabase string
-param postgresAdminLogin string
-@secure()
-param postgresAdminPassword string
-@secure()
-param djangoAdminPassword string
 
 resource plan 'Microsoft.Web/serverfarms@2023-01-01' = {
   name: 'asp-${appName}-backend-${environmentName}'
@@ -921,21 +997,10 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
       ftpsState: 'Disabled'
       // Apply migrations and seed the initial staff user before serving.
       appCommandLine: 'python manage.py migrate --noinput && python manage.py ensure_admin && gunicorn --bind=0.0.0.0:8000 --timeout 600 coaching_backend.wsgi'
-      appSettings: [
-        { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
-        { name: 'KEY_VAULT_URI', value: keyVaultUri }
-        { name: 'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true' }
-        { name: 'DJANGO_DEBUG', value: 'false' }
-        { name: 'CORS_ALLOWED_ORIGINS', value: 'https://${staticWebAppHostname}' }
-        { name: 'POSTGRES_HOST', value: postgresHost }
-        { name: 'POSTGRES_DB', value: postgresDatabase }
-        { name: 'POSTGRES_USER', value: postgresAdminLogin }
-        { name: 'POSTGRES_PASSWORD', value: postgresAdminPassword }
-        { name: 'DJANGO_ADMIN_USERNAME', value: 'admin' }
-        { name: 'DJANGO_ADMIN_PASSWORD', value: djangoAdminPassword }
-        // /home is App Service persistent storage; uploads survive restarts.
-        { name: 'MEDIA_ROOT', value: '/home/media' }
-      ]
+      // App settings are deliberately NOT declared here. They live in
+      // appServiceSettings.bicep, which runs after the Key Vault role
+      // assignment so that @Microsoft.KeyVault() references can resolve.
+      // Declaring them in both places makes the two overwrite each other.
     }
   }
   identity: { type: 'SystemAssigned' }
@@ -943,6 +1008,94 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
 
 output webAppName string = webApp.name
 output defaultHostName string = webApp.properties.defaultHostName
+// Consumed by keyVaultAccess.bicep to grant this site read access to secrets.
+output principalId string = webApp.identity.principalId
+""",
+            "keyVaultAccess.bicep": """// Grants the backend App Service's system-assigned identity read access to the
+// Key Vault secrets it resolves at startup. Split into its own module because
+// the role assignment needs the site's principalId, which only exists after the
+// site is created -- declaring it on the keyVault module would be circular.
+param keyVaultName string
+param principalId string
+
+// Built-in 'Key Vault Secrets User' role: get/list on secret values, nothing else.
+var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
+
+resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
+  name: keyVaultName
+}
+
+resource secretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: keyVault
+  // Deterministic name so redeploys update in place instead of conflicting.
+  name: guid(keyVault.id, principalId, keyVaultSecretsUserRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleId)
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+output roleAssignmentId string = secretsUser.id
+""",
+            "appServiceSettings.bicep": """// Every app setting for the backend, applied after keyVaultAccess so that the
+// @Microsoft.KeyVault() references below can be resolved by the site's managed
+// identity. Keep this the single source of app settings -- see appService.bicep.
+param webAppName string
+param appInsightsConnectionString string
+param keyVaultUri string
+param staticWebAppHostname string
+param postgresHost string
+param postgresDatabase string
+param postgresAdminLogin string
+param defaultFromEmail string
+
+resource webApp 'Microsoft.Web/sites@2023-01-01' existing = {
+  name: webAppName
+}
+
+// vaultUri already carries a trailing slash. Omitting the secret version means
+// the app always picks up the current value after a rotation.
+var secretsUri = '${keyVaultUri}secrets'
+
+resource appSettings 'Microsoft.Web/sites/config@2023-01-01' = {
+  parent: webApp
+  name: 'appsettings'
+  properties: {
+    APPLICATIONINSIGHTS_CONNECTION_STRING: appInsightsConnectionString
+    KEY_VAULT_URI: keyVaultUri
+    SCM_DO_BUILD_DURING_DEPLOYMENT: 'true'
+    DJANGO_DEBUG: 'false'
+    CORS_ALLOWED_ORIGINS: 'https://${staticWebAppHostname}'
+    POSTGRES_HOST: postgresHost
+    POSTGRES_DB: postgresDatabase
+    POSTGRES_USER: postgresAdminLogin
+    DJANGO_ADMIN_USERNAME: 'admin'
+    // /home is App Service persistent storage; uploads survive restarts.
+    MEDIA_ROOT: '/home/media'
+
+    // Secrets, resolved from Key Vault by the site's managed identity.
+    POSTGRES_PASSWORD: '@Microsoft.KeyVault(SecretUri=${secretsUri}/postgres-admin-password)'
+    DJANGO_ADMIN_PASSWORD: '@Microsoft.KeyVault(SecretUri=${secretsUri}/django-admin-password)'
+    DJANGO_SECRET_KEY: '@Microsoft.KeyVault(SecretUri=${secretsUri}/django-secret-key)'
+    RESEND_API_KEY: '@Microsoft.KeyVault(SecretUri=${secretsUri}/resend-api-key)'
+
+    // Email delivery. RESEND_API_KEY above selects the Resend backend in
+    // settings.py; without it Django falls back to the console backend and
+    // account-activation emails are never actually delivered. The sender domain
+    // must be one verified in Resend or messages are rejected.
+    DEFAULT_FROM_EMAIL: defaultFromEmail
+
+    // Absolute links embedded in outbound email. These default to localhost,
+    // which produced unusable invitations in every deployed environment.
+    // NOTE: the SPA has no client-side router -- it reads ?token= off the root
+    // URL (App.tsx) -- so the activation URL is the Static Web App root. Do not
+    // use the '/activate' default; that path is not a real route.
+    FRONTEND_BASE_URL: 'https://${staticWebAppHostname}'
+    FRONTEND_LOGIN_URL: 'https://${staticWebAppHostname}'
+    ACCOUNT_ACTIVATION_URL: 'https://${staticWebAppHostname}/'
+  }
+}
 """,
             "staticWebApp.bicep": """param appName string
 param environmentName string
@@ -1226,16 +1379,19 @@ jobs:
           scriptType: bash
           scriptLocation: inlineScript
           inlineScript: |
-            case "$POSTGRES_ADMIN_PASSWORD" in
-              ''|'$('*)
-                echo "##vso[task.logissue type=error]Secret variable 'postgresAdminPassword' is missing from the coaching-platform-common variable group"
-                exit 1;;
-            esac
-            case "$DJANGO_ADMIN_PASSWORD" in
-              ''|'$('*)
-                echo "##vso[task.logissue type=error]Secret variable 'djangoAdminPassword' is missing from the coaching-platform-common variable group"
-                exit 1;;
-            esac
+            # An unset secret variable arrives as the literal '$(name)', which
+            # bicepparam would happily compile in -- fail loudly instead.
+            require_secret() {
+              case "$2" in
+                ''|'$('*)
+                  echo "##vso[task.logissue type=error]Secret variable '$1' is missing from the coaching-platform-common variable group"
+                  exit 1;;
+              esac
+            }
+            require_secret postgresAdminPassword "$POSTGRES_ADMIN_PASSWORD"
+            require_secret djangoAdminPassword "$DJANGO_ADMIN_PASSWORD"
+            require_secret djangoSecretKey "$DJANGO_SECRET_KEY"
+            require_secret resendApiKey "$RESEND_API_KEY"
             az group create \\
               --name rg-coaching-platform-${{ parameters.environment }} \\
               --location "$(AZURE_LOCATION)" \\
@@ -1247,6 +1403,8 @@ jobs:
         env:
           POSTGRES_ADMIN_PASSWORD: $(postgresAdminPassword)
           DJANGO_ADMIN_PASSWORD: $(djangoAdminPassword)
+          DJANGO_SECRET_KEY: $(djangoSecretKey)
+          RESEND_API_KEY: $(resendApiKey)
         displayName: 'az deployment group what-if'
 """,
             "cost-gate.yml": """jobs:
@@ -1273,16 +1431,19 @@ steps:
       scriptType: bash
       scriptLocation: inlineScript
       inlineScript: |
-        case "$POSTGRES_ADMIN_PASSWORD" in
-          ''|'$('*)
-            echo "##vso[task.logissue type=error]Secret variable 'postgresAdminPassword' is missing from the coaching-platform-common variable group"
-            exit 1;;
-        esac
-        case "$DJANGO_ADMIN_PASSWORD" in
-          ''|'$('*)
-            echo "##vso[task.logissue type=error]Secret variable 'djangoAdminPassword' is missing from the coaching-platform-common variable group"
-            exit 1;;
-        esac
+        # An unset secret variable arrives as the literal '$(name)', which
+        # bicepparam would happily compile in -- fail loudly instead.
+        require_secret() {
+          case "$2" in
+            ''|'$('*)
+              echo "##vso[task.logissue type=error]Secret variable '$1' is missing from the coaching-platform-common variable group"
+              exit 1;;
+          esac
+        }
+        require_secret postgresAdminPassword "$POSTGRES_ADMIN_PASSWORD"
+        require_secret djangoAdminPassword "$DJANGO_ADMIN_PASSWORD"
+        require_secret djangoSecretKey "$DJANGO_SECRET_KEY"
+        require_secret resendApiKey "$RESEND_API_KEY"
         az group create \\
           --name rg-coaching-platform-${{ parameters.environment }} \\
           --location "$(AZURE_LOCATION)" \\
@@ -1294,6 +1455,8 @@ steps:
     env:
       POSTGRES_ADMIN_PASSWORD: $(postgresAdminPassword)
       DJANGO_ADMIN_PASSWORD: $(djangoAdminPassword)
+      DJANGO_SECRET_KEY: $(djangoSecretKey)
+      RESEND_API_KEY: $(resendApiKey)
     displayName: 'Deploy infrastructure (Bicep)'
   - task: AzureWebApp@1
     inputs:
@@ -1769,8 +1932,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Non-secret variable to add to the variable group (repeatable)",
     )
     provision_parser.add_argument(
-        "--secret-variable", action="append", default=[], metavar="KEY",
-        help="Secret variable name to add to the variable group; value is prompted for securely (repeatable)",
+        # default=None, not the list itself: argparse's 'append' adds to a
+        # non-empty default rather than replacing it, so an explicit flag would
+        # otherwise silently include the built-ins too.
+        "--secret-variable", action="append", default=None, metavar="KEY",
+        help="Secret variable name to add to the variable group; value is prompted for securely "
+             f"(repeatable; defaults to {', '.join(PIPELINE_SECRET_VARIABLES)})",
     )
     provision_parser.add_argument(
         "--pat-env-var", default="ADO_MCP_AUTH_TOKEN",
@@ -1875,7 +2042,11 @@ def main(argv: list[str] | None = None) -> int:
             variable_group=args.variable_group or f"{args.app_name}-common",
             approver_email=args.approver_email,
             variables=variables,
-            secret_variable_names=list(args.secret_variable),
+            secret_variable_names=list(
+                args.secret_variable
+                if args.secret_variable is not None
+                else PIPELINE_SECRET_VARIABLES
+            ),
         )
         print(provision_plan.to_markdown())
 

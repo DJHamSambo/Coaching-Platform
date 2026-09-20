@@ -1,13 +1,13 @@
 # DevOps Agent Plan - coaching-platform
 
-Generated: 2026-08-01T19:33:54.159163+00:00
+Generated: 2026-09-17T20:28:54.093885+00:00
 
 ## Detected application
 - **backend**: django (python), database=postgresql
 - **frontend**: vite+react (typescript)
 
 ## Environment: nonprod
-- Region: `uksouth`
+- Region: `australiaeast`
 - Resource group: `rg-coaching-platform-nonprod`
 
 | Resource | Azure service | SKU | Purpose | Est. USD/month |
@@ -28,7 +28,7 @@ Notes:
 - Resource group can be fully deleted (`teardown`) and rebuilt from Bicep on demand; no manual click-ops resources exist outside this IaC.
 
 ## Environment: prod
-- Region: `uksouth`
+- Region: `australiaeast`
 - Resource group: `rg-coaching-platform-prod`
 
 | Resource | Azure service | SKU | Purpose | Est. USD/month |

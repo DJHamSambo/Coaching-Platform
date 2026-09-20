@@ -660,6 +660,7 @@ interface ApiCoachee {
   user_phone?: string;
   added_by?: number;
   added_by_username?: string;
+  invitation_sent?: boolean | null;
 }
 
 function toCoachee(c: ApiCoachee): Coachee {
@@ -678,6 +679,7 @@ function toAdminCoachee(c: ApiCoachee): AdminCoachee {
     userPhone: c.user_phone ?? '',
     addedById: c.added_by ? String(c.added_by) : '',
     addedByUsername: c.added_by_username ?? '',
+    invitationSent: c.invitation_sent ?? null,
   };
 }
 

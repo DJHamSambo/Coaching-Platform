@@ -140,6 +140,19 @@ elif _smtp_configured:
     EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 else:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+    # The console backend reports every send as successful while writing the
+    # message to stdout, so a deployed environment that lands here looks healthy
+    # and silently drops account invitations. Make that loud: outside DEBUG it is
+    # always a misconfiguration (a missing RESEND_API_KEY app setting).
+    if not DEBUG:
+        import warnings
+
+        warnings.warn(
+            "No RESEND_API_KEY or EMAIL_HOST configured: falling back to the console "
+            "email backend. Account activation emails will NOT be delivered.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")

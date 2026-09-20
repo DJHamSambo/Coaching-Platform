@@ -13,16 +13,19 @@ jobs:
           scriptType: bash
           scriptLocation: inlineScript
           inlineScript: |
-            case "$POSTGRES_ADMIN_PASSWORD" in
-              ''|'$('*)
-                echo "##vso[task.logissue type=error]Secret variable 'postgresAdminPassword' is missing from the coaching-platform-common variable group"
-                exit 1;;
-            esac
-            case "$DJANGO_ADMIN_PASSWORD" in
-              ''|'$('*)
-                echo "##vso[task.logissue type=error]Secret variable 'djangoAdminPassword' is missing from the coaching-platform-common variable group"
-                exit 1;;
-            esac
+            # An unset secret variable arrives as the literal '$(name)', which
+            # bicepparam would happily compile in -- fail loudly instead.
+            require_secret() {
+              case "$2" in
+                ''|'$('*)
+                  echo "##vso[task.logissue type=error]Secret variable '$1' is missing from the coaching-platform-common variable group"
+                  exit 1;;
+              esac
+            }
+            require_secret postgresAdminPassword "$POSTGRES_ADMIN_PASSWORD"
+            require_secret djangoAdminPassword "$DJANGO_ADMIN_PASSWORD"
+            require_secret djangoSecretKey "$DJANGO_SECRET_KEY"
+            require_secret resendApiKey "$RESEND_API_KEY"
             az group create \
               --name rg-coaching-platform-${{ parameters.environment }} \
               --location "$(AZURE_LOCATION)" \
@@ -34,4 +37,6 @@ jobs:
         env:
           POSTGRES_ADMIN_PASSWORD: $(postgresAdminPassword)
           DJANGO_ADMIN_PASSWORD: $(djangoAdminPassword)
+          DJANGO_SECRET_KEY: $(djangoSecretKey)
+          RESEND_API_KEY: $(resendApiKey)
         displayName: 'az deployment group what-if'

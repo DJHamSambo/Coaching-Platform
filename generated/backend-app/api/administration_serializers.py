@@ -22,8 +22,9 @@ class CoachSerializer(serializers.ModelSerializer):
             user.set_password(password)
             user.save()
         else:
-            # No password supplied: provision a temporary one and email a
-            # welcome message; the coach must reset it on first sign-in.
+            # No password supplied: leave the account inactive and email an
+            # activation link so the coach sets their own password. No password
+            # is ever transmitted.
             user.set_unusable_password()
             user.save()
             provision_coach_login(user)
@@ -45,18 +46,25 @@ class AdminCoacheeSerializer(serializers.ModelSerializer):
     user_email = serializers.SerializerMethodField()
     user_phone = serializers.SerializerMethodField()
     request_questionnaire = serializers.BooleanField(write_only=True, required=False, default=True)
+    # True/False once an invitation was attempted, null when none was due. Set
+    # transiently by provision_coachee_login so the UI can warn that a coachee
+    # was created but never emailed, rather than reporting a plain success.
+    invitation_sent = serializers.SerializerMethodField()
 
     class Meta:
         model = Coachee
         fields = [
             "id", "name", "email", "notes", "user", "user_username",
             "user_email", "user_phone", "added_by", "added_by_username", "created_at",
-            "request_questionnaire",
+            "request_questionnaire", "invitation_sent",
         ]
         read_only_fields = [
             "id", "added_by", "added_by_username", "created_at",
-            "user_username", "user_email", "user_phone",
+            "user_username", "user_email", "user_phone", "invitation_sent",
         ]
+
+    def get_invitation_sent(self, obj) -> bool | None:
+        return getattr(obj, "invitation_sent", None)
 
     def get_user_email(self, obj) -> str:
         return obj.user.email if obj.user_id else ""
