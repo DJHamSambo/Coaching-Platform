@@ -53,6 +53,10 @@ export function AdministrationPanel({ currentUser, focusCoacheeId, focusContract
   const [coachees, setCoachees] = useState<AdminCoachee[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Distinct from `error`: the action succeeded, but something the admin needs
+  // to act on did not (e.g. the coachee was created but the invitation email
+  // could not be sent).
+  const [warning, setWarning] = useState<string | null>(null);
 
   const [addingCoach, setAddingCoach] = useState(false);
   const [addingCoachee, setAddingCoachee] = useState(false);
@@ -67,6 +71,7 @@ export function AdministrationPanel({ currentUser, focusCoacheeId, focusContract
   async function loadData() {
     setLoading(true);
     setError(null);
+    setWarning(null);
     try {
       const [coacheesList, coachesList] = await Promise.all([
         listAdminCoachees(),
@@ -181,6 +186,14 @@ export function AdministrationPanel({ currentUser, focusCoacheeId, focusContract
       setCoacheeForm(EMPTY_COACHEE_FORM);
       setAddingCoachee(false);
       setError(null);
+      // The coachee exists either way, so this is a warning rather than an
+      // error - but without it a failed invitation looks exactly like success.
+      setWarning(
+        created.invitationSent === false
+          ? `${created.name} was added, but the invitation email could not be sent. `
+            + 'Check the email configuration and re-send the invitation.'
+          : null,
+      );
     } catch {
       setError('Could not create coachee.');
     }
@@ -249,6 +262,7 @@ export function AdministrationPanel({ currentUser, focusCoacheeId, focusContract
       </p>
 
       {error && <p className='muted' style={{ color: '#c0392b' }}>{error}</p>}
+      {warning && <p className='muted' style={{ color: '#b7791f' }}>{warning}</p>}
       {loading && <p className='muted'>Loading administration data...</p>}
 
       {currentUser.isAdmin && (

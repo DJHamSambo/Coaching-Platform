@@ -34,6 +34,17 @@ param postgresAdminPassword string
 @secure()
 param djangoAdminPassword string
 
+@description('Django SECRET_KEY used to sign sessions and JWTs; without it the app falls back to the insecure dev key in settings.py')
+@secure()
+param djangoSecretKey string
+
+@description('Resend API key used to deliver account-activation email; without it Django silently falls back to the console backend')
+@secure()
+param resendApiKey string
+
+@description('From address for outbound email -- the domain must be verified in Resend or messages are rejected')
+param defaultFromEmail string = 'Coaching Platform <noreply@successby1000cuts.com>'
+
 var tags = {
   application: appName
   environment: environmentName
@@ -68,6 +79,10 @@ module keyVault 'modules/keyVault.bicep' = {
     environmentName: environmentName
     location: location
     tags: tags
+    postgresAdminPassword: postgresAdminPassword
+    djangoAdminPassword: djangoAdminPassword
+    djangoSecretKey: djangoSecretKey
+    resendApiKey: resendApiKey
   }
 }
 
@@ -100,15 +115,32 @@ module backendApp 'modules/appService.bicep' = {
     environmentName: environmentName
     location: location
     tags: tags
+  }
+}
+
+// Must land before appSettings: the site cannot resolve @Microsoft.KeyVault()
+// references until its identity holds the Key Vault Secrets User role.
+module keyVaultAccess 'modules/keyVaultAccess.bicep' = {
+  name: 'keyVaultAccess'
+  params: {
+    keyVaultName: keyVault.outputs.vaultName
+    principalId: backendApp.outputs.principalId
+  }
+}
+
+module backendAppSettings 'modules/appServiceSettings.bicep' = {
+  name: 'backendAppSettings'
+  params: {
+    webAppName: backendApp.outputs.webAppName
     appInsightsConnectionString: appInsights.outputs.connectionString
     keyVaultUri: keyVault.outputs.vaultUri
     staticWebAppHostname: staticWebApp.outputs.defaultHostName
     postgresHost: postgres.outputs.fullyQualifiedDomainName
     postgresDatabase: postgres.outputs.databaseName
     postgresAdminLogin: postgresAdminLogin
-    postgresAdminPassword: postgresAdminPassword
-    djangoAdminPassword: djangoAdminPassword
+    defaultFromEmail: defaultFromEmail
   }
+  dependsOn: [keyVaultAccess]
 }
 
 module staticWebApp 'modules/staticWebApp.bicep' = {

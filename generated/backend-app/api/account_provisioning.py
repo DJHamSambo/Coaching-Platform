@@ -111,7 +111,7 @@ def build_activation_link(raw_token: str, *, next_step: str | None = None) -> st
 
 def send_activation_email(
     *, user: User, raw_token: str, role: str, request_questionnaire: bool = False
-) -> None:
+) -> bool:
     """Email a secure activation link so the user can verify and set a password.
 
     When ``request_questionnaire`` is set for a coachee, the email also
@@ -119,12 +119,14 @@ def send_activation_email(
     links them straight to it once they've activated and signed in.
 
     No password is ever transmitted. Never raises — email failures are logged so
-    they don't block account provisioning.
+    they don't block account provisioning. Returns ``True`` when the message was
+    handed to the email backend, ``False`` otherwise, so callers can tell the
+    admin that the invitation needs re-sending instead of reporting success.
     """
     recipient = (user.email or "").strip()
     if not recipient:
         logger.warning("No email on record for %s; skipping activation email.", user.username)
-        return
+        return False
 
     role_label = "coach" if role == "coach" else "coachee"
     include_questionnaire = request_questionnaire and role == "coachee"
@@ -203,16 +205,30 @@ def send_activation_email(
             to=[recipient],
         )
         message.attach_alternative(html_body, "text/html")
-        message.send(fail_silently=False)
+        # send() returns the number of messages delivered; a backend can report
+        # zero without raising (e.g. Resend configured but rejecting the sender).
+        sent = message.send(fail_silently=False)
     except Exception:  # pragma: no cover - transport failures shouldn't block provisioning
         logger.exception("Failed to send activation email to %s", recipient)
+        return False
+
+    if not sent:
+        logger.error(
+            "Email backend %s accepted no messages for %s; activation email not delivered.",
+            settings.EMAIL_BACKEND,
+            recipient,
+        )
+        return False
+    return True
 
 
-def provision_coach_login(user: User) -> None:
+def provision_coach_login(user: User) -> bool:
     """Prepare a freshly created coach for activation.
 
     The account is left inactive with an unusable password until the coach
     verifies their email and sets a password via the emailed activation link.
+
+    Returns whether the activation email was actually sent.
     """
     user.set_unusable_password()
     if user.is_active:
@@ -220,7 +236,7 @@ def provision_coach_login(user: User) -> None:
     user.save(update_fields=["password", "is_active"])
     mark_email_verified(user, False)
     raw_token = create_activation_token(user)
-    send_activation_email(user=user, raw_token=raw_token, role="coach")
+    return send_activation_email(user=user, raw_token=raw_token, role="coach")
 
 
 def provision_coachee_login(coachee: Coachee, *, request_questionnaire: bool = True) -> User | None:
@@ -231,7 +247,13 @@ def provision_coachee_login(coachee: Coachee, *, request_questionnaire: bool = T
 
     Returns the created ``User`` or ``None`` if no account was provisioned
     (e.g. the coachee already has one or has no email address).
+
+    Also sets the transient ``coachee.invitation_sent`` attribute, which the
+    serializers surface on the create response: ``True`` when the invitation was
+    sent, ``False`` when it was attempted and failed, and ``None`` when no
+    invitation was due. Without it a mail outage looks identical to success.
     """
+    coachee.invitation_sent = None
     if coachee.user_id or not (coachee.email or "").strip():
         return None
 
@@ -255,7 +277,7 @@ def provision_coachee_login(coachee: Coachee, *, request_questionnaire: bool = T
 
     mark_email_verified(user, False)
     raw_token = create_activation_token(user)
-    send_activation_email(
+    coachee.invitation_sent = send_activation_email(
         user=user, raw_token=raw_token, role="coachee", request_questionnaire=request_questionnaire
     )
     return user

@@ -6,7 +6,7 @@
 
 ## Summary
 - The platform supports three roles — administrator, coach, and coachee — secured with JWT authentication.
-- Administrators onboard coaches and coachees; new accounts receive a welcome email with a temporary password and must set a new password on first sign-in.
+- Administrators onboard coaches and coachees; new accounts receive an emailed activation link and choose their own password before first sign-in.
 - Coaches manage coachees, build coaching plans with sequenced kanban actions, hold discussions with @mentions, record insights, manage availability and sessions, and share resources/documents.
 
 ## User stories
@@ -15,7 +15,7 @@
 - As an administrator, I want to create and manage coach accounts, so that coaches can access the platform.
 - As an administrator, I want to create and manage coachee accounts, so that coachees can be onboarded centrally.
 - As a coach, I want to add my own coachees, so that I can manage the people I work with.
-- As a new user, I want to receive a welcome email with a temporary password when my account is created, so that I can sign in for the first time.
+- As a new user, I want to receive an activation link by email when my account is created, so that I can verify my address and set my own password.
 - As a new user, I want to be required to set a strong password on first sign-in, so that my account is secured before I use it.
 - As a user, I want to change my password, so that I keep my account secure.
 
@@ -45,8 +45,9 @@
 ### Administration and onboarding
 - The system shall allow administrators to create, list, update, and delete coach accounts (`/api/admin/coaches`).
 - The system shall allow administrators to create, list, update, and delete coachee accounts (`/api/admin/coachees`) and browse a coach directory.
-- The system shall send a welcome email containing a temporary password when a coach or coachee account is provisioned.
-- The system shall flag accounts created with a temporary password (`must_reset_password`) and require a password change on first sign-in.
+- The system shall email a single-use activation link when a coach or coachee account is provisioned; no password is ever transmitted.
+- Accounts shall be created inactive with an unusable password until the activation link is redeemed, at which point the user sets their own password.
+- The create-coachee response shall report whether the invitation email was sent (`invitation_sent`), and the UI shall warn the administrator when it was not; a mail failure shall not roll back account creation.
 - The system shall allow users to change their password via `/api/auth/change-password`, clearing the forced-reset flag on success.
 
 ### Coaching plans and tasks
@@ -71,8 +72,11 @@
 ## Non-functional requirements
 - The API shall be secured with JWT authentication; protected endpoints require a valid bearer token.
 - Passwords shall meet a complexity policy: minimum 12 characters with at least one uppercase letter, one lowercase letter, one digit, and one special character (enforced via `AUTH_PASSWORD_VALIDATORS` and a custom `PasswordComplexityValidator`).
-- Temporary passwords shall be generated with the `secrets` module and shall always satisfy the complexity policy; they shall never be returned in API responses.
-- Email delivery shall be configurable via environment variables (`EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`/`EMAIL_USE_SSL`, `DEFAULT_FROM_EMAIL`, `FRONTEND_LOGIN_URL`); when no SMTP host is configured the console email backend is used for local development.
+- Activation tokens shall be generated with the `secrets` module, stored only as SHA-256 hashes, expire after `ACCOUNT_ACTIVATION_TOKEN_TTL_HOURS` (default 72), and be single-use; they shall never be returned in API responses.
+- Email delivery shall be configurable via environment variables, with the backend selected in this order: an explicit `EMAIL_BACKEND`, then the Resend HTTP API when `RESEND_API_KEY` is set (the deployed default), then SMTP when `EMAIL_HOST` is set (`EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`/`EMAIL_USE_SSL`), and finally the console backend for local development.
+- `DEFAULT_FROM_EMAIL` shall use a sender domain verified in Resend; the shared `onboarding@resend.dev` sandbox sender only delivers to the Resend account owner and is not usable for real coachees.
+- Links in outbound email shall be absolute and derived from `FRONTEND_BASE_URL` (`FRONTEND_LOGIN_URL`, `ACCOUNT_ACTIVATION_URL`). Since the SPA has no client-side router and reads `?token=` from the root URL, `ACCOUNT_ACTIVATION_URL` shall point at the site root.
+- Every deployed environment shall set `RESEND_API_KEY` and `DJANGO_SECRET_KEY`; falling back to the console email backend outside `DEBUG` shall emit a startup warning, since that backend reports sends as successful while delivering nothing.
 - The frontend shall surface DRF field-level validation messages rather than a generic error.
 
 ## Constraints and assumptions

@@ -85,10 +85,44 @@ Nothing is ever built or rebuilt without an explicit, recorded approval:
   cost guardrails, and (non-prod only) the auto-shutdown Automation Account.
 - `infra/azure/modules/*.bicep` — one module per Azure resource.
 - `infra/azure/envs/{nonprod,prod}.bicepparam` — per-environment parameters,
-  including a budget cap set 25% above the estimated cost. Secrets (e.g. the
-  PostgreSQL admin password) are never written to parameter files — they are
-  supplied at deploy time via `--parameters` or an Azure DevOps secret
-  variable/Key Vault-linked variable group.
+  including a budget cap set 25% above the estimated cost. Secrets are never
+  written to parameter files: each is read at compile time with
+  `readEnvironmentVariable(...)` from a secret variable in the
+  `<app-name>-common` variable group.
+
+### Secrets
+
+The four secret variables the pipeline requires are listed in
+`PIPELINE_SECRET_VARIABLES` in `agents/devops_agent.py`:
+
+| Variable group secret | Key Vault secret | App setting |
+| --- | --- | --- |
+| `postgresAdminPassword` | `postgres-admin-password` | `POSTGRES_PASSWORD` |
+| `djangoAdminPassword` | `django-admin-password` | `DJANGO_ADMIN_PASSWORD` |
+| `djangoSecretKey` | `django-secret-key` | `DJANGO_SECRET_KEY` |
+| `resendApiKey` | `resend-api-key` | `RESEND_API_KEY` |
+
+They flow variable group → pipeline env var → `.bicepparam` → Key Vault, and
+reach the app as `@Microsoft.KeyVault(SecretUri=...)` references, so no secret
+value is stored in App Service configuration. `deploy.yml` and `infra-plan.yml`
+fail the run if any is missing rather than deploying a misconfigured app.
+
+Two ordering constraints make this work, and are the thing to check if app
+settings come back unresolved:
+
+- `keyVaultAccess.bicep` grants the App Service's system-assigned identity the
+  **Key Vault Secrets User** role. It is a separate module because the role
+  assignment needs the site's `principalId`, which only exists once the site
+  does — putting it on the `keyVault` module would be circular.
+- `appServiceSettings.bicep` owns **all** app settings and `dependsOn` that role
+  assignment, so the references resolve. `appService.bicep` deliberately
+  declares none; declaring them in both places makes the two overwrite
+  each other on redeploy.
+
+`RESEND_API_KEY` in particular must be present in every deployed environment:
+without it Django falls back to the console email backend, which reports every
+send as successful while delivering nothing, so account invitations vanish
+silently.
 
 ## Azure DevOps CI/CD pipeline
 
@@ -162,7 +196,6 @@ python agents/devops_agent.py teardown --environment nonprod --confirm nonprod -
 python agents/devops_agent.py provision-ado --organization myorg --project MyProject
 python agents/devops_agent.py provision-ado --organization myorg --project MyProject \
   --approver-email alex@example.com \
-  --secret-variable postgresAdminPassword \
   --execute
 ```
 
@@ -179,9 +212,11 @@ repeatable instead of manual UI clicking:
 - Adds a manual **Approval** check to the prod environment, with the
   approver defaulting to the PAT owner (override with `--approver-email`).
 - Creates the `<app-name>-common` variable group referenced by
-  `azure-pipelines.yml`, optionally seeded with `--variable KEY=VALUE`
-  (plain) and `--secret-variable KEY` (value prompted for securely via
-  `getpass`, never passed on the command line).
+  `azure-pipelines.yml`, seeded with `--variable KEY=VALUE` (plain) and
+  `--secret-variable KEY` (value prompted for securely via `getpass`, never
+  passed on the command line). `--secret-variable` defaults to the four
+  secrets the pipeline requires (see **Secrets** above); pass it explicitly
+  only to override that set.
 - Everything is idempotent: re-running it only fills in what's missing.
 
 Authentication: reads a PAT from the `ADO_MCP_AUTH_TOKEN` environment

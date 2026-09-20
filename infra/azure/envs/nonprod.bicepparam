@@ -7,8 +7,11 @@ param location = 'australiaeast'
 param appName = 'coaching-platform'
 param monthlyBudgetUsd = 26
 param costAlertEmail = 'hamish.armstrong88@gmail.com'
-// Supplied at compile time from the POSTGRES_ADMIN_PASSWORD environment variable
-// (the pipeline maps it from the secret variable 'postgresAdminPassword');
-// never committed to source control.
+// Supplied at compile time from environment variables (the pipeline maps each
+// one from a secret variable in the 'coaching-platform-common' variable group);
+// never committed to source control. These are written into Key Vault by
+// main.bicep and reach the app as @Microsoft.KeyVault() references.
 param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD')
 param djangoAdminPassword = readEnvironmentVariable('DJANGO_ADMIN_PASSWORD')
+param djangoSecretKey = readEnvironmentVariable('DJANGO_SECRET_KEY')
+param resendApiKey = readEnvironmentVariable('RESEND_API_KEY')

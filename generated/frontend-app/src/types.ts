@@ -86,6 +86,9 @@ export interface AdminCoachee extends Coachee {
   userUsername?: string;
   userEmail?: string;
   userPhone?: string;
+  // Only meaningful on a create response: true when the activation email went
+  // out, false when sending failed, null when no invitation was due.
+  invitationSent?: boolean | null;
 }
 
 export interface CoachingPlan {
