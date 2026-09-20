@@ -188,10 +188,12 @@ export function AdministrationPanel({ currentUser, focusCoacheeId, focusContract
       setError(null);
       // The coachee exists either way, so this is a warning rather than an
       // error - but without it a failed invitation looks exactly like success.
+      // There is no re-send endpoint yet, so this deliberately does not offer
+      // one: it states the consequence and leaves the fix to configuration.
       setWarning(
         created.invitationSent === false
           ? `${created.name} was added, but the invitation email could not be sent. `
-            + 'Check the email configuration and re-send the invitation.'
+            + 'They cannot activate their account until it is. Check the email configuration.'
           : null,
       );
     } catch {
