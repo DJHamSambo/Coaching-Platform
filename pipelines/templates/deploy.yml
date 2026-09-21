@@ -39,6 +39,40 @@ steps:
       DJANGO_SECRET_KEY: $(djangoSecretKey)
       RESEND_API_KEY: $(resendApiKey)
     displayName: 'Deploy infrastructure (Bicep)'
+  # The app settings above are @Microsoft.KeyVault() references. They only
+  # resolve if the site's managed identity holds 'Key Vault Secrets User' on the
+  # vault. This deploy's service principal has Contributor, which cannot create
+  # role assignments, so that grant is a one-time manual step per environment.
+  # Without this check the app would deploy and then fail at runtime with
+  # unresolved settings, which is far harder to diagnose than a red build.
+  - task: AzureCLI@2
+    inputs:
+      azureSubscription: 'azure-service-connection'
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        RG=rg-coaching-platform-${{ parameters.environment }}
+        APP=app-coaching-platform-backend-${{ parameters.environment }}
+        VAULT=$(az deployment group show --resource-group "$RG" --name main \
+          --query properties.outputs.keyVaultName.value --output tsv)
+        PRINCIPAL=$(az deployment group show --resource-group "$RG" --name main \
+          --query properties.outputs.backendPrincipalId.value --output tsv)
+        SCOPE=$(az keyvault show --resource-group "$RG" --name "$VAULT" --query id --output tsv)
+        # Filter client-side on principalId so this needs no Graph lookup, and
+        # accept a broader grant inherited from the resource group/subscription.
+        FOUND=$(az role assignment list --scope "$SCOPE" --include-inherited \
+          --query "[?principalId=='$PRINCIPAL' && roleDefinitionName=='Key Vault Secrets User'] | [0].id" \
+          --output tsv)
+        if [ -z "$FOUND" ]; then
+          echo "##vso[task.logissue type=error]$APP cannot read Key Vault secrets: the 'Key Vault Secrets User' role is missing."
+          echo "##vso[task.logissue type=error]Its app settings are Key Vault references and will not resolve, so the app would start misconfigured."
+          echo "##vso[task.logissue type=error]This pipeline's service principal only has Contributor and cannot grant it."
+          echo "##vso[task.logissue type=error]Run once as Owner or User Access Administrator, then re-run this pipeline:"
+          echo "##vso[task.logissue type=error]  az role assignment create --assignee-object-id $PRINCIPAL --assignee-principal-type ServicePrincipal --role 'Key Vault Secrets User' --scope $SCOPE"
+          exit 1
+        fi
+        echo "'Key Vault Secrets User' present for $APP on $VAULT."
+    displayName: 'Verify Key Vault access (one-time manual grant)'
   - task: AzureWebApp@1
     inputs:
       azureSubscription: 'azure-service-connection'

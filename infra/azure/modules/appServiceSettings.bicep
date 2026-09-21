@@ -1,6 +1,10 @@
-// Every app setting for the backend, applied after keyVaultAccess so that the
-// @Microsoft.KeyVault() references below can be resolved by the site's managed
-// identity. Keep this the single source of app settings -- see appService.bicep.
+// Every app setting for the backend. The @Microsoft.KeyVault() references below
+// resolve through the site's managed identity, which needs the 'Key Vault
+// Secrets User' role on the vault. That role assignment is NOT created here:
+// the pipeline's service principal only holds Contributor, which excludes
+// Microsoft.Authorization/roleAssignments/write. It is granted once per
+// environment by hand and verified by a deploy-time check -- see
+// docs/devops-agent.md. Keep this the single source of app settings.
 param webAppName string
 param appInsightsConnectionString string
 param keyVaultUri string

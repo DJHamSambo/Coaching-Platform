@@ -107,17 +107,41 @@ reach the app as `@Microsoft.KeyVault(SecretUri=...)` references, so no secret
 value is stored in App Service configuration. `deploy.yml` and `infra-plan.yml`
 fail the run if any is missing rather than deploying a misconfigured app.
 
-Two ordering constraints make this work, and are the thing to check if app
-settings come back unresolved:
+`appServiceSettings.bicep` owns **all** app settings; `appService.bicep`
+deliberately declares none, because declaring them in both places makes the two
+overwrite each other on redeploy.
 
-- `keyVaultAccess.bicep` grants the App Service's system-assigned identity the
-  **Key Vault Secrets User** role. It is a separate module because the role
-  assignment needs the site's `principalId`, which only exists once the site
-  does — putting it on the `keyVault` module would be circular.
-- `appServiceSettings.bicep` owns **all** app settings and `dependsOn` that role
-  assignment, so the references resolve. `appService.bicep` deliberately
-  declares none; declaring them in both places makes the two overwrite
-  each other on redeploy.
+### One-time Key Vault grant per environment
+
+The App Service identity needs the **Key Vault Secrets User** role before those
+references resolve. That role assignment is **not** created by Bicep: the
+pipeline's service principal holds Contributor, which excludes
+`Microsoft.Authorization/roleAssignments/write`. Granting CI the ability to
+write role assignments would let it escalate itself to Owner, so the grant is
+made once per environment by a human instead.
+
+`deploy.yml` verifies it on every run ("Verify Key Vault access") and fails with
+the exact command if missing — the app would otherwise deploy and then start
+with unresolved settings, which is much harder to diagnose than a red build.
+Note that `what-if` does **not** catch the missing permission, so this check is
+the only pre-runtime signal.
+
+Run once, as Owner or User Access Administrator:
+
+```bash
+RG=rg-coaching-platform-nonprod
+APP=app-coaching-platform-backend-nonprod
+PRINCIPAL=$(az webapp identity show -g "$RG" -n "$APP" --query principalId -o tsv)
+SCOPE=$(az keyvault show -g "$RG" -n kv-coaching-platform-non --query id -o tsv)
+az role assignment create \
+  --assignee-object-id "$PRINCIPAL" \
+  --assignee-principal-type ServicePrincipal \
+  --role 'Key Vault Secrets User' \
+  --scope "$SCOPE"
+```
+
+The vault name is truncated to 24 characters, so it is `kv-coaching-platform-non`
+for nonprod and `kv-coaching-platform-pro` for prod.
 
 `RESEND_API_KEY` in particular must be present in every deployed environment:
 without it Django falls back to the console email backend, which reports every
