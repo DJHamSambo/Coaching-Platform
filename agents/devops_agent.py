@@ -717,16 +717,11 @@ module backendApp 'modules/appService.bicep' = {
   }
 }
 
-// Must land before appSettings: the site cannot resolve @Microsoft.KeyVault()
-// references until its identity holds the Key Vault Secrets User role.
-module keyVaultAccess 'modules/keyVaultAccess.bicep' = {
-  name: 'keyVaultAccess'
-  params: {
-    keyVaultName: keyVault.outputs.vaultName
-    principalId: backendApp.outputs.principalId
-  }
-}
-
+// NOTE: the site's identity also needs the 'Key Vault Secrets User' role on the
+// vault before these references resolve. That role assignment is deliberately
+// not declared here -- the deploy service principal holds only Contributor,
+// which cannot write role assignments. It is granted once per environment by
+// hand; deploy.yml verifies it and fails with the exact command if missing.
 module backendAppSettings 'modules/appServiceSettings.bicep' = {
   name: 'backendAppSettings'
   params: {
@@ -739,7 +734,6 @@ module backendAppSettings 'modules/appServiceSettings.bicep' = {
     postgresAdminLogin: postgresAdminLogin
     defaultFromEmail: defaultFromEmail
   }
-  dependsOn: [keyVaultAccess]
 }
 
 module staticWebApp 'modules/staticWebApp.bicep' = {
@@ -777,6 +771,9 @@ module autoShutdown 'modules/autoShutdown.bicep' = if (environmentName == 'nonpr
 output backendUrl string = backendApp.outputs.defaultHostName
 output frontendUrl string = staticWebApp.outputs.defaultHostName
 output postgresServerName string = postgres.outputs.serverName
+// Consumed by the 'Verify Key Vault access' step in deploy.yml.
+output keyVaultName string = keyVault.outputs.vaultName
+output backendPrincipalId string = backendApp.outputs.principalId
 """
 
     def _param_file(self, plan: InfrastructurePlan, env_plan: EnvironmentInfraPlan) -> str:
@@ -1011,36 +1008,13 @@ output defaultHostName string = webApp.properties.defaultHostName
 // Consumed by keyVaultAccess.bicep to grant this site read access to secrets.
 output principalId string = webApp.identity.principalId
 """,
-            "keyVaultAccess.bicep": """// Grants the backend App Service's system-assigned identity read access to the
-// Key Vault secrets it resolves at startup. Split into its own module because
-// the role assignment needs the site's principalId, which only exists after the
-// site is created -- declaring it on the keyVault module would be circular.
-param keyVaultName string
-param principalId string
-
-// Built-in 'Key Vault Secrets User' role: get/list on secret values, nothing else.
-var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
-
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
-  name: keyVaultName
-}
-
-resource secretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: keyVault
-  // Deterministic name so redeploys update in place instead of conflicting.
-  name: guid(keyVault.id, principalId, keyVaultSecretsUserRoleId)
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleId)
-    principalId: principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-output roleAssignmentId string = secretsUser.id
-""",
-            "appServiceSettings.bicep": """// Every app setting for the backend, applied after keyVaultAccess so that the
-// @Microsoft.KeyVault() references below can be resolved by the site's managed
-// identity. Keep this the single source of app settings -- see appService.bicep.
+            "appServiceSettings.bicep": """// Every app setting for the backend. The @Microsoft.KeyVault() references below
+// resolve through the site's managed identity, which needs the 'Key Vault
+// Secrets User' role on the vault. That role assignment is NOT created here:
+// the pipeline's service principal only holds Contributor, which excludes
+// Microsoft.Authorization/roleAssignments/write. It is granted once per
+// environment by hand and verified by a deploy-time check -- see
+// docs/devops-agent.md. Keep this the single source of app settings.
 param webAppName string
 param appInsightsConnectionString string
 param keyVaultUri string
@@ -1458,6 +1432,46 @@ steps:
       DJANGO_SECRET_KEY: $(djangoSecretKey)
       RESEND_API_KEY: $(resendApiKey)
     displayName: 'Deploy infrastructure (Bicep)'
+  # The app settings above are @Microsoft.KeyVault() references. They only
+  # resolve if the site's managed identity holds 'Key Vault Secrets User' on the
+  # vault. This deploy's service principal has Contributor, which cannot create
+  # role assignments, so that grant is a one-time manual step per environment.
+  # Without this check the app would deploy and then fail at runtime with
+  # unresolved settings, which is far harder to diagnose than a red build.
+  - task: AzureCLI@2
+    inputs:
+      azureSubscription: 'azure-service-connection'
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        RG=rg-coaching-platform-${{ parameters.environment }}
+        APP=app-coaching-platform-backend-${{ parameters.environment }}
+        VAULT=$(az deployment group show --resource-group "$RG" --name main \\
+          --query properties.outputs.keyVaultName.value --output tsv)
+        PRINCIPAL=$(az deployment group show --resource-group "$RG" --name main \\
+          --query properties.outputs.backendPrincipalId.value --output tsv)
+        # Without this the checks below would silently compare against empty
+        # strings and print a remediation command that cannot be run.
+        if [ -z "$VAULT" ] || [ -z "$PRINCIPAL" ]; then
+          echo "##vso[task.logissue type=error]Could not read keyVaultName/backendPrincipalId from the 'main' deployment outputs in $RG."
+          exit 1
+        fi
+        SCOPE=$(az keyvault show --resource-group "$RG" --name "$VAULT" --query id --output tsv)
+        # Filter client-side on principalId so this needs no Graph lookup, and
+        # accept a broader grant inherited from the resource group/subscription.
+        FOUND=$(az role assignment list --scope "$SCOPE" --include-inherited \\
+          --query "[?principalId=='$PRINCIPAL' && roleDefinitionName=='Key Vault Secrets User'] | [0].id" \\
+          --output tsv)
+        if [ -z "$FOUND" ]; then
+          echo "##vso[task.logissue type=error]$APP cannot read Key Vault secrets: the 'Key Vault Secrets User' role is missing."
+          echo "##vso[task.logissue type=error]Its app settings are Key Vault references and will not resolve, so the app would start misconfigured."
+          echo "##vso[task.logissue type=error]This pipeline's service principal only has Contributor and cannot grant it."
+          echo "##vso[task.logissue type=error]Run once as Owner or User Access Administrator, then re-run this pipeline:"
+          echo "##vso[task.logissue type=error]  az role assignment create --assignee-object-id $PRINCIPAL --assignee-principal-type ServicePrincipal --role 'Key Vault Secrets User' --scope $SCOPE"
+          exit 1
+        fi
+        echo "'Key Vault Secrets User' present for $APP on $VAULT."
+    displayName: 'Verify Key Vault access (one-time manual grant)'
   - task: AzureWebApp@1
     inputs:
       azureSubscription: 'azure-service-connection'

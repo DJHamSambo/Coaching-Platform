@@ -118,16 +118,11 @@ module backendApp 'modules/appService.bicep' = {
   }
 }
 
-// Must land before appSettings: the site cannot resolve @Microsoft.KeyVault()
-// references until its identity holds the Key Vault Secrets User role.
-module keyVaultAccess 'modules/keyVaultAccess.bicep' = {
-  name: 'keyVaultAccess'
-  params: {
-    keyVaultName: keyVault.outputs.vaultName
-    principalId: backendApp.outputs.principalId
-  }
-}
-
+// NOTE: the site's identity also needs the 'Key Vault Secrets User' role on the
+// vault before these references resolve. That role assignment is deliberately
+// not declared here -- the deploy service principal holds only Contributor,
+// which cannot write role assignments. It is granted once per environment by
+// hand; deploy.yml verifies it and fails with the exact command if missing.
 module backendAppSettings 'modules/appServiceSettings.bicep' = {
   name: 'backendAppSettings'
   params: {
@@ -140,7 +135,6 @@ module backendAppSettings 'modules/appServiceSettings.bicep' = {
     postgresAdminLogin: postgresAdminLogin
     defaultFromEmail: defaultFromEmail
   }
-  dependsOn: [keyVaultAccess]
 }
 
 module staticWebApp 'modules/staticWebApp.bicep' = {
@@ -178,3 +172,6 @@ module autoShutdown 'modules/autoShutdown.bicep' = if (environmentName == 'nonpr
 output backendUrl string = backendApp.outputs.defaultHostName
 output frontendUrl string = staticWebApp.outputs.defaultHostName
 output postgresServerName string = postgres.outputs.serverName
+// Consumed by the 'Verify Key Vault access' step in deploy.yml.
+output keyVaultName string = keyVault.outputs.vaultName
+output backendPrincipalId string = backendApp.outputs.principalId
