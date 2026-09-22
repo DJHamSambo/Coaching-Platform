@@ -1450,6 +1450,12 @@ steps:
           --query properties.outputs.keyVaultName.value --output tsv)
         PRINCIPAL=$(az deployment group show --resource-group "$RG" --name main \\
           --query properties.outputs.backendPrincipalId.value --output tsv)
+        # Without this the checks below would silently compare against empty
+        # strings and print a remediation command that cannot be run.
+        if [ -z "$VAULT" ] || [ -z "$PRINCIPAL" ]; then
+          echo "##vso[task.logissue type=error]Could not read keyVaultName/backendPrincipalId from the 'main' deployment outputs in $RG."
+          exit 1
+        fi
         SCOPE=$(az keyvault show --resource-group "$RG" --name "$VAULT" --query id --output tsv)
         # Filter client-side on principalId so this needs no Graph lookup, and
         # accept a broader grant inherited from the resource group/subscription.
