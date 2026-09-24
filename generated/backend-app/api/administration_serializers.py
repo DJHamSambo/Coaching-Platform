@@ -8,7 +8,11 @@ from api.models import Coachee
 
 
 class CoachSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, required=False, allow_blank=False)
+    # allow_blank: the Add coach form has no password field and posts an empty
+    # string, which DRF rejected as "This field may not be blank" - so creating
+    # a coach from the UI always failed. A blank password is meaningful here: it
+    # means "provision the account and email an activation link" (see create()).
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = User

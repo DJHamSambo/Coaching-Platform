@@ -122,8 +122,10 @@ export function AdministrationPanel({ currentUser, focusCoacheeId, focusContract
       setCoachForm(EMPTY_COACH_FORM);
       setAddingCoach(false);
       setError(null);
-    } catch {
-      setError('Could not create coach.');
+    } catch (err) {
+      // request() already parses DRF field errors into a client-safe message;
+      // discarding it left "Could not create coach." hiding the real cause.
+      setError(err instanceof Error && err.message ? err.message : 'Could not create coach.');
     }
   }
 
@@ -196,8 +198,8 @@ export function AdministrationPanel({ currentUser, focusCoacheeId, focusContract
             + 'They cannot activate their account until it is. Check the email configuration.'
           : null,
       );
-    } catch {
-      setError('Could not create coachee.');
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : 'Could not create coachee.');
     }
   }
 
