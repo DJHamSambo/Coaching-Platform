@@ -15,6 +15,15 @@ def _resolve_owner(request) -> User:
     return owner
 
 
+def _is_admin(user) -> bool:
+    """Administrators oversee every coach's plans, not just their own.
+
+    Without this the plan queries below filter on ``coach=<the admin>``, so an
+    admin could only open plans they happened to create themselves.
+    """
+    return bool(user and getattr(user, "is_authenticated", False) and user.is_staff)
+
+
 def _is_coachee_user(user) -> bool:
     if not user or not getattr(user, "is_authenticated", False):
         return False
@@ -46,9 +55,13 @@ def _validate_action_assignee(request, plan, assignee_name):
         if assignee_name not in allowed:
             raise PermissionDenied("Coachees can only assign actions to themselves or their coach.")
     else:
-        # Coaches can only assign to themselves or the assigned coachee
+        # Coaches can only assign to themselves or the assigned coachee. The
+        # plan's own coach is included so an admin acting on someone else's plan
+        # can assign to that coach; for a coach it is already their own name.
         coach_user = _resolve_owner(request)
-        allowed = {coach_user.username, plan.coachee.name}
+        allowed = {coach_user.username, plan.coach.username}
+        if plan.coachee is not None:
+            allowed.add(plan.coachee.name)
         if assignee_name not in allowed:
             raise PermissionDenied("Coaches can only assign actions to themselves or the assigned coachee.")
 
@@ -66,6 +79,8 @@ class PlansListView(generics.ListCreateAPIView):
         owner = _resolve_owner(self.request)
         if _is_coachee_user(self.request.user):
             return CoachingPlan.objects.filter(coachee__in=_linked_coachee_profiles(self.request.user)).order_by("target_date")
+        if _is_admin(self.request.user):
+            return CoachingPlan.objects.all().order_by("target_date")
         return CoachingPlan.objects.filter(coach=owner).order_by("target_date")
 
     def perform_create(self, serializer):
@@ -98,6 +113,8 @@ class PlansDetailView(generics.RetrieveUpdateDestroyAPIView):
         owner = _resolve_owner(self.request)
         if _is_coachee_user(self.request.user):
             return CoachingPlan.objects.filter(coachee__in=_linked_coachee_profiles(self.request.user))
+        if _is_admin(self.request.user):
+            return CoachingPlan.objects.all()
         return CoachingPlan.objects.filter(coach=owner)
 
     def perform_update(self, serializer):
@@ -123,6 +140,8 @@ class PlanActionsListView(generics.ListCreateAPIView):
                 pk=plan_id,
                 coachee__in=_linked_coachee_profiles(self.request.user)
             ).first()
+        elif _is_admin(self.request.user):
+            plan = CoachingPlan.objects.filter(pk=plan_id).first()
         else:
             owner = _resolve_owner(self.request)
             plan = CoachingPlan.objects.filter(pk=plan_id, coach=owner).first()
@@ -177,6 +196,8 @@ class PlanActionsDetailView(generics.RetrieveUpdateDestroyAPIView):
             if not plan:
                 return Task.objects.none()
             return Task.objects.filter(plan_id=plan.id)
+        elif _is_admin(self.request.user):
+            return Task.objects.filter(plan_id=plan_id)
         else:
             owner = _resolve_owner(self.request)
             return Task.objects.filter(plan_id=plan_id, plan__coach=owner)
@@ -185,8 +206,11 @@ class PlanActionsDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance = self.get_object()
         plan_id = self.kwargs["plan_id"]
         owner = _resolve_owner(self.request)
-        plan = CoachingPlan.objects.get(pk=plan_id) if _is_coachee_user(self.request.user) else CoachingPlan.objects.get(pk=plan_id, coach=owner)
-        
+        if _is_coachee_user(self.request.user) or _is_admin(self.request.user):
+            plan = CoachingPlan.objects.get(pk=plan_id)
+        else:
+            plan = CoachingPlan.objects.get(pk=plan_id, coach=owner)
+
         if _is_coachee_user(self.request.user):
             # Coachees can only update status for now (no reassignment)
             if "status" not in self.request.data or len(self.request.data) > 1:

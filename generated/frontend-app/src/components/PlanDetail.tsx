@@ -60,6 +60,10 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
   const [assignee, setAssignee] = useState('');
   const [dueDate, setDueDate] = useState('');
   const currentUsername = useMemo(() => getCurrentUsername(), []);
+  // Admins oversee every coach's plans, so they manage them like a coach does.
+  // Gating on role === 'coach' alone hid the Edit plan button and the status
+  // control from admins entirely, since /api/auth/me reports them as 'admin'.
+  const canManagePlan = currentUser.role !== 'coachee';
 
   const coacheeName = plan.coacheeName ?? coachees.find((c) => c.id === plan.coacheeId)?.name ?? null;
   const assigneeOptions = useMemo(() => {
@@ -395,7 +399,7 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
               {plan.targetDate && <span className='muted'>📅 Target: {plan.targetDate}</span>}
             </div>
           </div>
-          {currentUser.role === 'coach' && (
+          {canManagePlan && (
             <button type='button' className='primary' onClick={() => setEditingPlan(true)}>Edit plan</button>
           )}
         </div>
@@ -403,7 +407,7 @@ export function PlanDetail({ plan, coachees, coaches, currentUser, onBack, onPla
 
       {/* Status Section */}
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-        {currentUser.role === 'coach' ? (
+        {canManagePlan ? (
           <>
             <strong>Status:</strong>
             <select

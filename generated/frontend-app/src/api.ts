@@ -740,15 +740,18 @@ export async function createAdminCoach(payload: {
   isAdmin: boolean;
   isActive: boolean;
 }): Promise<AdminCoach> {
+  const body: Record<string, unknown> = {
+    username: payload.username,
+    email: payload.email ?? '',
+    is_staff: payload.isAdmin,
+    is_active: payload.isActive,
+  };
+  // Omit rather than send '' - the account is then provisioned with an
+  // activation email instead of a password.
+  if (payload.password) body.password = payload.password;
   const created = await request<ApiCoach>('/api/admin/coaches/', {
     method: 'POST',
-    body: JSON.stringify({
-      username: payload.username,
-      email: payload.email ?? '',
-      password: payload.password ?? '',
-      is_staff: payload.isAdmin,
-      is_active: payload.isActive,
-    }),
+    body: JSON.stringify(body),
   });
   return toAdminCoach(created);
 }
