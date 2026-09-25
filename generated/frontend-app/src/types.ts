@@ -77,6 +77,9 @@ export interface AdminCoach {
   email: string;
   isAdmin: boolean;
   isActive: boolean;
+  // Only meaningful on a create response: true when the activation email went
+  // out, false when sending failed, null when no invitation was due.
+  invitationSent?: boolean | null;
 }
 
 export interface AdminCoachee extends Coachee {

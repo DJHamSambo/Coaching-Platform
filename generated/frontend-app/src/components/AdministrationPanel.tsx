@@ -122,6 +122,14 @@ export function AdministrationPanel({ currentUser, focusCoacheeId, focusContract
       setCoachForm(EMPTY_COACH_FORM);
       setAddingCoach(false);
       setError(null);
+      // Same treatment as a coachee: the account exists either way, but without
+      // this a failed invitation is indistinguishable from success.
+      setWarning(
+        created.invitationSent === false
+          ? `${created.username} was added, but the invitation email could not be sent. `
+            + 'They cannot activate their account until it is. Check the email configuration.'
+          : null,
+      );
     } catch (err) {
       // request() already parses DRF field errors into a client-safe message;
       // discarding it left "Could not create coach." hiding the real cause.
