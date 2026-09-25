@@ -706,6 +706,7 @@ interface ApiCoach {
   email: string;
   is_staff: boolean;
   is_active: boolean;
+  invitation_sent?: boolean | null;
 }
 
 function toAdminCoach(coach: ApiCoach): AdminCoach {
@@ -715,6 +716,7 @@ function toAdminCoach(coach: ApiCoach): AdminCoach {
     email: coach.email,
     isAdmin: coach.is_staff,
     isActive: coach.is_active,
+    invitationSent: coach.invitation_sent ?? null,
   };
 }
 

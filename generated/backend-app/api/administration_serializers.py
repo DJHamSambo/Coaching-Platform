@@ -13,11 +13,21 @@ class CoachSerializer(serializers.ModelSerializer):
     # a coach from the UI always failed. A blank password is meaningful here: it
     # means "provision the account and email an activation link" (see create()).
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    # True/False once an invitation was attempted, null when none was due
+    # (a password was supplied). Mirrors AdminCoacheeSerializer so a failed
+    # coach invitation cannot be reported to the admin as plain success.
+    invitation_sent = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ["id", "username", "email", "is_staff", "is_active", "password"]
-        read_only_fields = ["id"]
+        fields = [
+            "id", "username", "email", "is_staff", "is_active", "password",
+            "invitation_sent",
+        ]
+        read_only_fields = ["id", "invitation_sent"]
+
+    def get_invitation_sent(self, obj) -> bool | None:
+        return getattr(obj, "invitation_sent", None)
 
     def create(self, validated_data):
         password = validated_data.pop("password", "")
@@ -25,13 +35,15 @@ class CoachSerializer(serializers.ModelSerializer):
         if password:
             user.set_password(password)
             user.save()
+            # No invitation is due: the coach can sign in with this password.
+            user.invitation_sent = None
         else:
             # No password supplied: leave the account inactive and email an
             # activation link so the coach sets their own password. No password
             # is ever transmitted.
             user.set_unusable_password()
             user.save()
-            provision_coach_login(user)
+            user.invitation_sent = provision_coach_login(user)
         return user
 
     def update(self, instance, validated_data):
