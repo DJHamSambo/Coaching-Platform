@@ -15,3 +15,6 @@ param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD')
 param djangoAdminPassword = readEnvironmentVariable('DJANGO_ADMIN_PASSWORD')
 param djangoSecretKey = readEnvironmentVariable('DJANGO_SECRET_KEY')
 param resendApiKey = readEnvironmentVariable('RESEND_API_KEY')
+// Set by the pipeline from the existing budget (empty on first deploy) so a
+// redeploy in a later month doesn't try to move the budget's start date.
+param budgetStartDate = readEnvironmentVariable('BUDGET_START_DATE', '')
