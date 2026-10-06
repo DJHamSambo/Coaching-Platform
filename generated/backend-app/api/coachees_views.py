@@ -14,7 +14,9 @@ def _resolve_owner(request) -> User:
 
 class CoacheesListView(generics.ListCreateAPIView):
     serializer_class = CoacheeSerializer
-    permission_classes = [permissions.AllowAny]
+    # Creating a coachee can email an invitation to an existing person, so
+    # this must never be reachable anonymously (it used to fall back to demo_coach).
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         return Coachee.objects.filter(added_by=_resolve_owner(self.request)).order_by("name")
@@ -25,7 +27,9 @@ class CoacheesListView(generics.ListCreateAPIView):
 
 class CoacheesDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = CoacheeSerializer
-    permission_classes = [permissions.AllowAny]
+    # Creating a coachee can email an invitation to an existing person, so
+    # this must never be reachable anonymously (it used to fall back to demo_coach).
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         return Coachee.objects.filter(added_by=_resolve_owner(self.request))

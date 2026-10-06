@@ -117,6 +117,11 @@ class MultiCoachRelationshipTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertIsNone(Coachee.objects.get(pk=response.data["id"]).user)
 
+    def test_anonymous_callers_cannot_add_coachees(self):
+        response = APIClient().post("/api/coachees/", {"name": "Jo", "email": "jo@example.com"}, format="json")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(len(mail.outbox), 0)
+
     def test_accept_and_decline(self):
         rel_b = Coachee.objects.get(pk=self._coach_b_adds_jo().data["id"])
         self.assertEqual(self._accept(rel_b).status_code, 200)
