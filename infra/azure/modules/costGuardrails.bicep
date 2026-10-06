@@ -3,8 +3,8 @@ param environmentName string
 param monthlyBudgetUsd int
 param costAlertEmail string
 
-@description('Start of the budget period. utcNow() is only valid as a parameter default in Bicep, so it cannot be inlined directly into the resource below.')
-param budgetStartDate string = utcNow('yyyy-MM-01')
+@description('Start of the budget period (first of a month). Azure cannot change this on an existing budget, so main.bicep passes the existing date on redeploys.')
+param budgetStartDate string
 
 resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
   name: 'ag-${appName}-cost-${environmentName}'

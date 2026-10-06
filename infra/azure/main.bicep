@@ -23,6 +23,12 @@ param monthlyBudgetUsd int = environmentName == 'prod' ? 400 : 100
 @description('Email address to receive budget/cost alerts')
 param costAlertEmail string
 
+@description('Start date of the existing budget, read by the pipeline before deploying. Azure rejects any change to a budget start date, so redeploys must reuse it. Empty when the budget does not exist yet.')
+param budgetStartDate string = ''
+
+@description('First day of the current month, used only when creating the budget. utcNow() is only valid as a parameter default.')
+param currentMonthStart string = utcNow('yyyy-MM-01')
+
 @description('PostgreSQL administrator login name')
 param postgresAdminLogin string = 'coachadmin'
 
@@ -154,6 +160,7 @@ module costGuardrails 'modules/costGuardrails.bicep' = {
     environmentName: environmentName
     monthlyBudgetUsd: monthlyBudgetUsd
     costAlertEmail: costAlertEmail
+    budgetStartDate: empty(budgetStartDate) ? currentMonthStart : budgetStartDate
   }
 }
 

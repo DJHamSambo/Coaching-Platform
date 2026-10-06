@@ -30,6 +30,14 @@ jobs:
               --name rg-coaching-platform-${{ parameters.environment }} \
               --location "$(AZURE_LOCATION)" \
               --output none
+            # Azure rejects changing an existing budget's start date, which the
+            # current-month default would do in every new month. Reuse the existing
+            # date; empty (no budget yet) makes main.bicep use the current month.
+            SUBSCRIPTION_ID=$(az account show --query id --output tsv)
+            BUDGET_URL="https://management.azure.com/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-coaching-platform-${{ parameters.environment }}/providers/Microsoft.Consumption/budgets/budget-coaching-platform-${{ parameters.environment }}?api-version=2023-11-01"
+            BUDGET_START_DATE=$(az rest --method get --url "$BUDGET_URL" --query properties.timePeriod.startDate --output tsv 2>/dev/null | cut -c1-10)
+            export BUDGET_START_DATE
+            echo "Budget start date: ${BUDGET_START_DATE:-none yet, a new budget will start this month}"
             az deployment group what-if \
               --resource-group rg-coaching-platform-${{ parameters.environment }} \
               --template-file infra/azure/main.bicep \

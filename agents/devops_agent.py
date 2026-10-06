@@ -622,6 +622,12 @@ param monthlyBudgetUsd int = environmentName == 'prod' ? 400 : 100
 @description('Email address to receive budget/cost alerts')
 param costAlertEmail string
 
+@description('Start date of the existing budget, read by the pipeline before deploying. Azure rejects any change to a budget start date, so redeploys must reuse it. Empty when the budget does not exist yet.')
+param budgetStartDate string = ''
+
+@description('First day of the current month, used only when creating the budget. utcNow() is only valid as a parameter default.')
+param currentMonthStart string = utcNow('yyyy-MM-01')
+
 @description('PostgreSQL administrator login name')
 param postgresAdminLogin string = 'coachadmin'
 
@@ -753,6 +759,7 @@ module costGuardrails 'modules/costGuardrails.bicep' = {
     environmentName: environmentName
     monthlyBudgetUsd: monthlyBudgetUsd
     costAlertEmail: costAlertEmail
+    budgetStartDate: empty(budgetStartDate) ? currentMonthStart : budgetStartDate
   }
 }
 
@@ -795,6 +802,9 @@ param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD')
 param djangoAdminPassword = readEnvironmentVariable('DJANGO_ADMIN_PASSWORD')
 param djangoSecretKey = readEnvironmentVariable('DJANGO_SECRET_KEY')
 param resendApiKey = readEnvironmentVariable('RESEND_API_KEY')
+// Set by the pipeline from the existing budget (empty on first deploy) so a
+// redeploy in a later month doesn't try to move the budget's start date.
+param budgetStartDate = readEnvironmentVariable('BUDGET_START_DATE', '')
 """
 
     def _module_files(self) -> dict[str, str]:
@@ -1097,8 +1107,8 @@ param environmentName string
 param monthlyBudgetUsd int
 param costAlertEmail string
 
-@description('Start of the budget period. utcNow() is only valid as a parameter default in Bicep, so it cannot be inlined directly into the resource below.')
-param budgetStartDate string = utcNow('yyyy-MM-01')
+@description('Start of the budget period (first of a month). Azure cannot change this on an existing budget, so main.bicep passes the existing date on redeploys.')
+param budgetStartDate string
 
 resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
   name: 'ag-${appName}-cost-${environmentName}'
@@ -1370,6 +1380,14 @@ jobs:
               --name rg-coaching-platform-${{ parameters.environment }} \\
               --location "$(AZURE_LOCATION)" \\
               --output none
+            # Azure rejects changing an existing budget's start date, which the
+            # current-month default would do in every new month. Reuse the existing
+            # date; empty (no budget yet) makes main.bicep use the current month.
+            SUBSCRIPTION_ID=$(az account show --query id --output tsv)
+            BUDGET_URL="https://management.azure.com/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-coaching-platform-${{ parameters.environment }}/providers/Microsoft.Consumption/budgets/budget-coaching-platform-${{ parameters.environment }}?api-version=2023-11-01"
+            BUDGET_START_DATE=$(az rest --method get --url "$BUDGET_URL" --query properties.timePeriod.startDate --output tsv 2>/dev/null | cut -c1-10)
+            export BUDGET_START_DATE
+            echo "Budget start date: ${BUDGET_START_DATE:-none yet, a new budget will start this month}"
             az deployment group what-if \\
               --resource-group rg-coaching-platform-${{ parameters.environment }} \\
               --template-file infra/azure/main.bicep \\
@@ -1422,6 +1440,14 @@ steps:
           --name rg-coaching-platform-${{ parameters.environment }} \\
           --location "$(AZURE_LOCATION)" \\
           --output none
+        # Azure rejects changing an existing budget's start date, which the
+        # current-month default would do in every new month. Reuse the existing
+        # date; empty (no budget yet) makes main.bicep use the current month.
+        SUBSCRIPTION_ID=$(az account show --query id --output tsv)
+        BUDGET_URL="https://management.azure.com/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rg-coaching-platform-${{ parameters.environment }}/providers/Microsoft.Consumption/budgets/budget-coaching-platform-${{ parameters.environment }}?api-version=2023-11-01"
+        BUDGET_START_DATE=$(az rest --method get --url "$BUDGET_URL" --query properties.timePeriod.startDate --output tsv 2>/dev/null | cut -c1-10)
+        export BUDGET_START_DATE
+        echo "Budget start date: ${BUDGET_START_DATE:-none yet, a new budget will start this month}"
         az deployment group create \\
           --resource-group rg-coaching-platform-${{ parameters.environment }} \\
           --template-file infra/azure/main.bicep \\

@@ -208,6 +208,27 @@ class BicepGeneratorTests(unittest.TestCase):
             )
             self.assertNotIn("postgresAdminPassword = '", param_content)
 
+    def test_budget_start_date_is_reused_on_redeploy(self) -> None:
+        # Azure rejects changing an existing budget's start date, so a
+        # current-month default broke the first deploy of every new month.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            _write_backend_and_frontend(repo_root)
+            profile = AppAnalyzer().analyze(repo_root)
+            plan = InfrastructurePlanner(app_name="test-app").build_plan(profile)
+            output_dir = repo_root / "infra" / "azure"
+            BicepGenerator().write(plan, output_dir)
+
+            for env in ("nonprod", "prod"):
+                param_content = (output_dir / "envs" / f"{env}.bicepparam").read_text(encoding="utf-8")
+                self.assertIn(
+                    "param budgetStartDate = readEnvironmentVariable('BUDGET_START_DATE', '')", param_content
+                )
+            main_bicep = (output_dir / "main.bicep").read_text(encoding="utf-8")
+            self.assertIn("budgetStartDate: empty(budgetStartDate) ? currentMonthStart : budgetStartDate", main_bicep)
+            module = (output_dir / "modules" / "costGuardrails.bicep").read_text(encoding="utf-8")
+            self.assertNotIn("utcNow", module)
+
 
 class AzurePipelineGeneratorTests(unittest.TestCase):
     def test_writes_pipeline_and_templates(self) -> None:
@@ -227,6 +248,21 @@ class AzurePipelineGeneratorTests(unittest.TestCase):
             pipeline_text = (repo_root / "azure-pipelines.yml").read_text(encoding="utf-8")
             self.assertIn("coaching-platform-prod", pipeline_text)
             self.assertIn("CostGate", pipeline_text)
+
+    def test_deploy_and_what_if_look_up_the_existing_budget_start_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo_root = Path(temp_dir)
+            _write_backend_and_frontend(repo_root)
+            profile = AppAnalyzer().analyze(repo_root)
+            plan = InfrastructurePlanner(app_name="test-app").build_plan(profile)
+            pipelines_dir = repo_root / "pipelines"
+            AzurePipelineGenerator().write(plan, pipelines_dir)
+
+            for template, command in (("deploy.yml", "az deployment group create"), ("infra-plan.yml", "az deployment group what-if")):
+                text = (pipelines_dir / "templates" / template).read_text(encoding="utf-8")
+                self.assertIn("export BUDGET_START_DATE", text)
+                # Must be set before the deployment compiles the bicepparam file.
+                self.assertLess(text.index("export BUDGET_START_DATE"), text.index(command))
 
     def test_pipeline_template_references_match_actual_write_location(self) -> None:
         # azure-pipelines.yml is written to the repo root while its templates are
