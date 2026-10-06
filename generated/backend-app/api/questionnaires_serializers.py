@@ -4,10 +4,13 @@ from api.models import FoundationalQuestionnaire
 
 
 class FoundationalQuestionnaireSerializer(serializers.ModelSerializer):
+    coach_username = serializers.CharField(source="coachee.added_by.username", read_only=True, default=None)
+
     class Meta:
         model = FoundationalQuestionnaire
-        fields = ["id", "name", "answers", "submitted_at"]
-        read_only_fields = ("id", "submitted_at")
+        fields = ["id", "name", "answers", "coachee", "coach_username", "submitted_at"]
+        read_only_fields = ("id", "coach_username", "submitted_at")
+        extra_kwargs = {"coachee": {"required": False, "allow_null": True}}
 
     def validate_answers(self, value):
         if not isinstance(value, list):

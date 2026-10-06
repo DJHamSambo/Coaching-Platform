@@ -80,16 +80,56 @@ class EmailVerificationToken(models.Model):
 
 
 class Coachee(models.Model):
-    """A coachee managed by coaches within the platform."""
+    """One coaching relationship between a coach (``added_by``) and a person.
+
+    A person has a single login (``user``) but one ``Coachee`` row per coach
+    they work with. Everything created within a relationship (plans, sessions,
+    insights, contracts, questionnaires) points at this row, so it stays private
+    to that coach and coachee unless the coachee explicitly shares it with
+    another of their relationships via ``DataShare``.
+
+    A relationship starts ``invited`` and only becomes ``active`` once the
+    coachee consents: by activating a new account, or by accepting the
+    invitation when they already have one.
+    """
+
+    STATUS_INVITED = "invited"
+    STATUS_ACTIVE = "active"
+    STATUS_DECLINED = "declined"
+    STATUS_ENDED = "ended"
+    STATUS_CHOICES = [
+        (STATUS_INVITED, "Invitation pending"),
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_DECLINED, "Declined"),
+        (STATUS_ENDED, "Ended"),
+    ]
+
     name = models.CharField(max_length=255)
     email = models.EmailField(blank=True, default="")
     notes = models.TextField(blank=True, default="")
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="coachee_profiles")
     added_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="coachees")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    responded_at = models.DateTimeField(
+        null=True, blank=True, help_text="When the coachee accepted, declined, or ended the relationship."
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["added_by", "user"],
+                condition=models.Q(user__isnull=False),
+                name="unique_coach_coachee_user",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.name
+
+    @property
+    def is_active(self) -> bool:
+        return self.status == self.STATUS_ACTIVE
 
 
 class CoachingPlan(models.Model):
@@ -226,13 +266,18 @@ class Notification(models.Model):
         ("contract_executed", "Contract Executed"),
         ("coachee_activated", "Coachee Activated"),
         ("questionnaire_completed", "Foundational Questionnaire Completed"),
+        ("coaching_invitation", "Coaching Invitation"),
+        ("invitation_accepted", "Coaching Invitation Accepted"),
+        ("invitation_declined", "Coaching Invitation Declined"),
+        ("relationship_ended", "Coaching Relationship Ended"),
+        ("data_shared", "Coachee Shared Data"),
     ]
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
     actor_name = models.CharField(max_length=150, blank=True, default="", help_text="Display name of who triggered the notification")
     notification_type = models.CharField(max_length=32, choices=TYPE_CHOICES)
     message = models.CharField(max_length=500)
     # Navigation context — where clicking the notification should take the user
-    target_type = models.CharField(max_length=32, blank=True, default="", help_text="plan | action | session | insight | contract | coachee")
+    target_type = models.CharField(max_length=32, blank=True, default="", help_text="plan | action | session | insight | contract | coachee | relationship")
     target_id = models.IntegerField(null=True, blank=True)
     plan_id = models.IntegerField(null=True, blank=True)
     action_id = models.IntegerField(null=True, blank=True)
@@ -296,6 +341,14 @@ class FoundationalQuestionnaire(models.Model):
     owner = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="questionnaires"
     )
+    coachee = models.ForeignKey(
+        Coachee,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="questionnaires",
+        help_text="The coaching relationship this questionnaire was completed for.",
+    )
     name = models.CharField(max_length=255, blank=True, default="")
     answers = models.JSONField(default=list)
     submitted_at = models.DateTimeField(auto_now_add=True)
@@ -341,3 +394,80 @@ class CoachingContract(models.Model):
 
     def __str__(self) -> str:
         return f"Contract<{self.coach.username}:{self.created_at:%Y-%m-%d}>"
+
+
+class DataShare(models.Model):
+    """A coachee's explicit, revocable grant letting one of their coaches see an
+    item that belongs to a different coaching relationship.
+
+    Exactly one of ``plan``, ``insight`` or ``questionnaire`` is set. Shares are
+    read-only for the receiving coach and never created by default. Revoking a
+    share sets ``revoked_at`` rather than deleting the row, so there is an audit
+    trail of what was visible and when.
+    """
+
+    ITEM_TYPES = ("plan", "insight", "questionnaire")
+
+    granted_to = models.ForeignKey(
+        Coachee, on_delete=models.CASCADE, related_name="received_shares",
+        help_text="The relationship (coach) the item is shared with.",
+    )
+    granted_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="data_shares")
+    plan = models.ForeignKey(
+        CoachingPlan, on_delete=models.CASCADE, null=True, blank=True, related_name="shares"
+    )
+    insight = models.ForeignKey(
+        Insight, on_delete=models.CASCADE, null=True, blank=True, related_name="shares"
+    )
+    questionnaire = models.ForeignKey(
+        FoundationalQuestionnaire, on_delete=models.CASCADE, null=True, blank=True, related_name="shares"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(plan__isnull=False, insight__isnull=True, questionnaire__isnull=True)
+                    | models.Q(plan__isnull=True, insight__isnull=False, questionnaire__isnull=True)
+                    | models.Q(plan__isnull=True, insight__isnull=True, questionnaire__isnull=False)
+                ),
+                name="datashare_exactly_one_item",
+            ),
+            models.UniqueConstraint(
+                fields=["granted_to", "plan"],
+                condition=models.Q(revoked_at__isnull=True, plan__isnull=False),
+                name="unique_active_plan_share",
+            ),
+            models.UniqueConstraint(
+                fields=["granted_to", "insight"],
+                condition=models.Q(revoked_at__isnull=True, insight__isnull=False),
+                name="unique_active_insight_share",
+            ),
+            models.UniqueConstraint(
+                fields=["granted_to", "questionnaire"],
+                condition=models.Q(revoked_at__isnull=True, questionnaire__isnull=False),
+                name="unique_active_questionnaire_share",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"DataShare<{self.item_type}:{self.item_id} -> {self.granted_to_id}>"
+
+    @property
+    def item_type(self) -> str:
+        if self.plan_id:
+            return "plan"
+        if self.insight_id:
+            return "insight"
+        return "questionnaire"
+
+    @property
+    def item_id(self) -> int | None:
+        return self.plan_id or self.insight_id or self.questionnaire_id
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None

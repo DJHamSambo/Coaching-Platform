@@ -11,7 +11,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from api.account_provisioning import hash_token, mark_email_verified, mark_must_reset_password
-from api.models import EmailVerificationToken
+from api.models import Coachee, EmailVerificationToken
 
 
 def _lookup_valid_token(raw_token: str) -> EmailVerificationToken | None:
@@ -100,6 +100,19 @@ def activate_account(request: Request) -> Response:
 
         mark_email_verified(user, True)
         mark_must_reset_password(user, False)
+
+        # Activating the account is the coachee's consent to the coach who
+        # created it (their earliest relationship). Any later invitations stay
+        # pending until they accept them from their Profile.
+        first_invite = (
+            Coachee.objects.filter(user=user, status=Coachee.STATUS_INVITED)
+            .order_by("created_at", "id")
+            .first()
+        )
+        if first_invite is not None:
+            first_invite.status = Coachee.STATUS_ACTIVE
+            first_invite.responded_at = timezone.now()
+            first_invite.save(update_fields=["status", "responded_at"])
 
     return Response(
         {"detail": "Your account is activated. You can now sign in.", "username": user.username},

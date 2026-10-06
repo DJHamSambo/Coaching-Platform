@@ -20,7 +20,13 @@ import type {
   QuestionnaireItem,
   ContractData,
   ContractItem,
+  CoachingRelationship,
+  RelationshipStatus,
   ResourceItem,
+  ShareableItem,
+  ShareableItems,
+  SharedData,
+  ShareItemType,
   TaskStatus,
   UnavailablePeriod,
   WeeklyAvailabilityWindow,
@@ -183,6 +189,8 @@ interface ApiQuestionnaire {
   id: number;
   name: string;
   answers: QuestionnaireAnswer[];
+  coachee?: number | null;
+  coach_username?: string | null;
   submitted_at: string;
 }
 
@@ -192,6 +200,8 @@ function toQuestionnaire(item: ApiQuestionnaire): QuestionnaireItem {
     name: item.name,
     answers: Array.isArray(item.answers) ? item.answers : [],
     submittedAt: item.submitted_at,
+    coacheeId: item.coachee != null ? String(item.coachee) : null,
+    coachUsername: item.coach_username ?? null,
   };
 }
 
@@ -206,10 +216,14 @@ export async function listQuestionnaires(coacheeId?: string): Promise<Questionna
 export async function createQuestionnaire(payload: {
   name: string;
   answers: QuestionnaireAnswer[];
+  // Which coaching relationship this is for; required when there are several.
+  coacheeId?: string | null;
 }): Promise<QuestionnaireItem> {
+  const body: Record<string, unknown> = { name: payload.name, answers: payload.answers };
+  if (payload.coacheeId) body.coachee = Number(payload.coacheeId);
   const created = await request<ApiQuestionnaire>('/api/questionnaires/', {
     method: 'POST',
-    body: JSON.stringify({ name: payload.name, answers: payload.answers }),
+    body: JSON.stringify(body),
   });
   return toQuestionnaire(created);
 }
@@ -660,6 +674,7 @@ interface ApiCoachee {
   user_phone?: string;
   added_by?: number;
   added_by_username?: string;
+  status?: RelationshipStatus;
   invitation_sent?: boolean | null;
 }
 
@@ -673,6 +688,7 @@ function toAdminCoachee(c: ApiCoachee): AdminCoachee {
     name: c.name,
     email: c.email,
     notes: c.notes,
+    status: c.status ?? 'active',
     user: c.user ? String(c.user) : null,
     userUsername: c.user_username ?? '',
     userEmail: c.user_email ?? '',
@@ -1240,4 +1256,134 @@ export async function createResource(payload: {
 
 export async function deleteResource(resourceId: string): Promise<void> {
   await request<void>(`/api/resources/${resourceId}/`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
+// Coaching relationships (coachee side) and coachee-controlled sharing
+// ---------------------------------------------------------------------------
+
+interface ApiRelationship {
+  id: number;
+  coach_id: number;
+  coach_username: string;
+  coach_name: string;
+  status: RelationshipStatus;
+  created_at: string;
+  responded_at: string | null;
+  active_share_count: number;
+}
+
+function toRelationship(r: ApiRelationship): CoachingRelationship {
+  return {
+    id: String(r.id),
+    coachId: String(r.coach_id),
+    coachUsername: r.coach_username,
+    coachName: r.coach_name,
+    status: r.status,
+    createdAt: r.created_at,
+    respondedAt: r.responded_at,
+    activeShareCount: r.active_share_count,
+  };
+}
+
+export async function listMyRelationships(): Promise<CoachingRelationship[]> {
+  const items = await request<ApiRelationship[]>('/api/relationships/');
+  return items.map(toRelationship);
+}
+
+export async function respondToRelationship(
+  relationshipId: string,
+  action: 'accept' | 'decline' | 'end',
+): Promise<CoachingRelationship> {
+  const updated = await request<ApiRelationship>(`/api/relationships/${relationshipId}/${action}/`, { method: 'POST' });
+  return toRelationship(updated);
+}
+
+interface ApiShareableItem {
+  id: number;
+  label: string;
+  source: string;
+  share_id: number | null;
+}
+
+function toShareableItem(item: ApiShareableItem): ShareableItem {
+  return {
+    id: String(item.id),
+    label: item.label,
+    source: item.source,
+    shareId: item.share_id != null ? String(item.share_id) : null,
+  };
+}
+
+export async function listShareableItems(relationshipId: string): Promise<ShareableItems> {
+  const data = await request<{ plans: ApiShareableItem[]; insights: ApiShareableItem[]; questionnaires: ApiShareableItem[] }>(
+    `/api/relationships/${relationshipId}/shareable/`,
+  );
+  return {
+    plans: data.plans.map(toShareableItem),
+    insights: data.insights.map(toShareableItem),
+    questionnaires: data.questionnaires.map(toShareableItem),
+  };
+}
+
+export async function shareItem(relationshipId: string, itemType: ShareItemType, itemId: string): Promise<string> {
+  const created = await request<{ id: number }>(`/api/relationships/${relationshipId}/shares/`, {
+    method: 'POST',
+    body: JSON.stringify({ item_type: itemType, item_id: Number(itemId) }),
+  });
+  return String(created.id);
+}
+
+export async function revokeShare(relationshipId: string, shareId: string): Promise<void> {
+  await request<void>(`/api/relationships/${relationshipId}/shares/${shareId}/`, { method: 'DELETE' });
+}
+
+interface ApiSharedData {
+  plans: {
+    share_id: number;
+    shared_at: string;
+    id: number;
+    title: string;
+    description: string;
+    goal: string;
+    status: string;
+    target_date: string | null;
+    actions: { title: string; status: string; due_date: string | null }[];
+  }[];
+  insights: { share_id: number; shared_at: string; id: number; note: string; author: string; created_at: string }[];
+  questionnaires: { share_id: number; shared_at: string; id: number; name: string; answers: QuestionnaireAnswer[]; submitted_at: string }[];
+}
+
+// Coach side: what this coachee has chosen to share from other engagements.
+export async function getCoacheeSharedData(coacheeId: string): Promise<SharedData> {
+  const data = await request<ApiSharedData>(`/api/coachees/${coacheeId}/shared/`);
+  return {
+    plans: data.plans.map((p) => ({
+      shareId: String(p.share_id),
+      sharedAt: p.shared_at,
+      id: String(p.id),
+      title: p.title,
+      description: p.description,
+      goal: p.goal,
+      status: p.status,
+      targetDate: p.target_date,
+      actions: p.actions.map((a) => ({ title: a.title, status: a.status, dueDate: a.due_date })),
+    })),
+    insights: data.insights.map((i) => ({
+      shareId: String(i.share_id),
+      sharedAt: i.shared_at,
+      id: String(i.id),
+      note: i.note,
+      author: i.author,
+      createdAt: i.created_at,
+    })),
+    questionnaires: data.questionnaires.map((q) => ({
+      shareId: String(q.share_id),
+      sharedAt: q.shared_at,
+      id: String(q.id),
+      name: q.name,
+      answers: Array.isArray(q.answers) ? q.answers : [],
+      submittedAt: q.submitted_at,
+    })),
+  };
 }

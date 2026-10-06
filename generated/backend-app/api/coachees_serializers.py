@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from api.account_provisioning import provision_coachee_login
+from api.account_provisioning import add_coachee_for_coach
 from api.models import Coachee
 
 
@@ -12,15 +12,20 @@ class CoacheeSerializer(serializers.ModelSerializer):
         model = Coachee
         fields = [
             "id", "name", "email", "notes", "user", "user_username",
-            "added_by", "created_at", "invitation_sent",
+            "added_by", "status", "responded_at", "created_at", "invitation_sent",
         ]
-        read_only_fields = ["id", "added_by", "created_at", "user_username", "invitation_sent"]
+        # ``user`` is set only by matching the email server-side; letting a
+        # coach write it would let them attach any login to their relationship.
+        read_only_fields = [
+            "id", "user", "added_by", "status", "responded_at", "created_at",
+            "user_username", "invitation_sent",
+        ]
 
     def get_invitation_sent(self, obj) -> bool | None:
         return getattr(obj, "invitation_sent", None)
 
     def create(self, validated_data):
-        coachee = super().create(validated_data)
-        # Provision a login account + activation email when an email is provided.
-        provision_coachee_login(coachee)
-        return coachee
+        coach = validated_data.pop("added_by")
+        # Matches an existing coachee login by email or provisions a new one,
+        # and emails the invitation either way.
+        return add_coachee_for_coach(super().create, validated_data, coach)

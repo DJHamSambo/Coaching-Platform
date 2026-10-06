@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { updateProfile } from '../api';
-import type { CurrentUser } from '../types';
+import { listMyRelationships, updateProfile } from '../api';
+import type { CoachingRelationship, CurrentUser } from '../types';
 import { FoundationalQuestionnaire } from './FoundationalQuestionnaire';
 import { CoachingContract } from './CoachingContract';
+import { MyCoaches } from './MyCoaches';
 
 interface ProfilePanelProps {
   currentUser: CurrentUser;
@@ -40,6 +41,37 @@ export function ProfilePanel({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const isCoachee = currentUser.role === 'coachee';
+  const [relationships, setRelationships] = useState<CoachingRelationship[]>([]);
+  const [relationshipsLoading, setRelationshipsLoading] = useState(isCoachee);
+  const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isCoachee) return;
+    let cancelled = false;
+    setRelationshipsLoading(true);
+    listMyRelationships()
+      .then((items) => {
+        if (!cancelled) {
+          setRelationships(items);
+          setRelationshipsError(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRelationshipsError('Could not load your coaches.');
+      })
+      .finally(() => {
+        if (!cancelled) setRelationshipsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCoachee]);
+
+  const activeCoaches = relationships
+    .filter((rel) => rel.status === 'active')
+    .map((rel) => ({ relationshipId: rel.id, coachName: rel.coachName }));
 
   useEffect(() => {
     setUsername(currentUser.username);
@@ -200,11 +232,20 @@ export function ProfilePanel({
         </form>
       </section>
 
-      {currentUser.role === 'coachee' && (
+      {isCoachee && (
         <>
+          <MyCoaches
+            relationships={relationships}
+            loading={relationshipsLoading}
+            error={relationshipsError}
+            onRelationshipUpdated={(updated) =>
+              setRelationships((prev) => prev.map((rel) => (rel.id === updated.id ? updated : rel)))
+            }
+          />
           <CoachingContract currentUser={currentUser} focusContractId={focusContractId} onFocusHandled={onFocusHandled} />
           <FoundationalQuestionnaire
             currentUsername={currentUser.username}
+            coaches={activeCoaches}
             autoOpen={autoOpenQuestionnaire}
             onAutoOpenHandled={onAutoOpenQuestionnaireHandled}
           />

@@ -10,7 +10,7 @@ import {
   updateAdminCoach,
 } from '../api';
 import { isValidInputEmail, sanitizeInput, sanitizeInputEmail } from './adminFormUtils';
-import { CoacheeDetailPanel } from './CoacheeDetailPanel';
+import { CoacheeDetailPanel, RELATIONSHIP_STATUS_LABELS } from './CoacheeDetailPanel';
 import type { AdminCoachee, AdminCoach, CurrentUser } from '../types';
 
 interface AdministrationPanelProps {
@@ -260,6 +260,9 @@ export function AdministrationPanel({ currentUser, focusCoacheeId, focusContract
         }}
         focusContractId={focusContractId}
         onFocusHandled={onFocusHandled}
+        onCoacheeUpdated={(updated) =>
+          setCoachees((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+        }
       />
     );
   }
@@ -320,7 +323,9 @@ export function AdministrationPanel({ currentUser, focusCoacheeId, focusContract
                 style={{ background: 'none', border: 'none', textAlign: 'left', padding: 0, cursor: 'pointer', flex: 1 }}
               >
                 <strong>{coachee.name}</strong>
-                <p className='muted' style={{ margin: '4px 0' }}>{coachee.email || 'No email'}</p>
+                <p className='muted' style={{ margin: '4px 0' }}>
+                  {coachee.email || 'No email'} · {RELATIONSHIP_STATUS_LABELS[coachee.status]}
+                </p>
                 {currentUser.isAdmin && <p className='muted' style={{ margin: 0 }}>Added by: {coachee.addedByUsername || 'Unknown'}</p>}
               </button>
               <div className='admin-panel-actions'>

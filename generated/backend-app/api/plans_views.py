@@ -3,8 +3,9 @@ from rest_framework import generics, permissions
 from rest_framework.exceptions import PermissionDenied
 from django.contrib.auth.models import User
 from api.plans_serializers import CoachingPlanSerializer, CoachingPlanListSerializer, ActionSerializer
-from api.models import Coachee, CoachingPlan, Task
+from api.models import CoachingPlan, Task
 from api.notifications import notify, resolve_recipient
+from api.relationships import coachee_recipient, coachee_relationships as _linked_coachee_profiles, is_coachee_user as _is_coachee_user
 
 
 def _resolve_owner(request) -> User:
@@ -24,24 +25,12 @@ def _is_admin(user) -> bool:
     return bool(user and getattr(user, "is_authenticated", False) and user.is_staff)
 
 
-def _is_coachee_user(user) -> bool:
-    if not user or not getattr(user, "is_authenticated", False):
-        return False
-    # Prefer FK link; fall back only for legacy coachees without a linked user
-    return (
-        Coachee.objects.filter(user=user).exists()
-        or Coachee.objects.filter(user__isnull=True, name__iexact=user.username).exists()
-    )
-
-
-def _linked_coachee_profiles(user):
-    if not user or not getattr(user, "is_authenticated", False):
-        return Coachee.objects.none()
-    # Prefer FK link; fall back only for legacy coachees without a linked user
-    by_user = Coachee.objects.filter(user=user)
-    if by_user.exists():
-        return by_user
-    return Coachee.objects.filter(user__isnull=True, name__iexact=user.username)
+def _validate_plan_coachee(request, coachee):
+    """A coach may only attach a plan to one of their own relationships."""
+    if coachee is None or _is_admin(request.user):
+        return
+    if coachee.added_by_id != _resolve_owner(request).id:
+        raise PermissionDenied("You can only assign plans to your own coachees.")
 
 
 def _validate_action_assignee(request, plan, assignee_name):
@@ -86,12 +75,14 @@ class PlansListView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         if _is_coachee_user(self.request.user):
             raise PermissionDenied("Coachees cannot create coaching plans.")
+        _validate_plan_coachee(self.request, serializer.validated_data.get("coachee"))
         plan = serializer.save(coach=_resolve_owner(self.request))
 
-        # Notify the assigned coachee that a new plan was created for them.
+        # Notify the assigned coachee that a new plan was created for them
+        # (only once they've accepted the relationship).
         coachee = plan.coachee
-        if coachee is not None:
-            recipient = coachee.user if coachee.user_id else resolve_recipient(coachee.name)
+        recipient = coachee_recipient(coachee)
+        if recipient is not None:
             actor_name = getattr(self.request.user, "username", "") or ""
             notify(
                 recipient,
@@ -120,6 +111,8 @@ class PlansDetailView(generics.RetrieveUpdateDestroyAPIView):
     def perform_update(self, serializer):
         if _is_coachee_user(self.request.user):
             raise PermissionDenied("Coachees cannot update coaching plans.")
+        if "coachee" in serializer.validated_data:
+            _validate_plan_coachee(self.request, serializer.validated_data["coachee"])
         serializer.save()
 
     def perform_destroy(self, instance):

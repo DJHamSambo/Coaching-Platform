@@ -13,8 +13,10 @@ from django.contrib.auth.models import User
 from django.core.mail import EmailMultiAlternatives
 from django.utils import timezone
 from django.utils.html import escape
+from rest_framework import serializers
 
 from api.models import Coachee, EmailVerificationToken, UserProfile
+from api.notifications import notify
 
 logger = logging.getLogger(__name__)
 
@@ -281,3 +283,175 @@ def provision_coachee_login(coachee: Coachee, *, request_questionnaire: bool = T
         user=user, raw_token=raw_token, role="coachee", request_questionnaire=request_questionnaire
     )
     return user
+
+
+def _display_name(user: User) -> str:
+    return (user.get_full_name() or user.username).strip()
+
+
+def find_existing_coachee_account(email: str, coach: User) -> tuple[User | None, Coachee | None]:
+    """Resolve the person behind ``email`` so a coachee is only ever one record.
+
+    Returns ``(user, reusable_relationship)``:
+    - ``(None, None)`` when nobody has this email yet (provision a new login).
+    - ``(user, None)`` when the person already has a coachee login, so a new
+      relationship with this coach should be created for that same user.
+    - ``(user, relationship)`` when this coach previously had a relationship
+      with them that was declined or ended, which should be re-opened instead
+      of duplicated.
+
+    Raises ``ValidationError`` when the email belongs to a coach/admin account
+    or this coach already has a live relationship with the person.
+    """
+    email = (email or "").strip()
+    if not email:
+        return None, None
+    # Prefer an existing coachee login: older data can have a coach account
+    # and a coachee account sharing one email address.
+    user = (
+        User.objects.filter(email__iexact=email, is_staff=False, coachee_profiles__isnull=False)
+        .distinct()
+        .order_by("id")
+        .first()
+    )
+    if user is None:
+        if User.objects.filter(email__iexact=email).exists():
+            raise serializers.ValidationError(
+                {"email": ["This email address belongs to a coach or administrator account and can't be added as a coachee."]}
+            )
+        return None, None
+
+    existing = Coachee.objects.filter(added_by=coach, user=user).first()
+    if existing is None:
+        return user, None
+    if existing.status in (Coachee.STATUS_INVITED, Coachee.STATUS_ACTIVE):
+        raise serializers.ValidationError(
+            {"email": ["You already have a coaching relationship (or a pending invitation) with this person."]}
+        )
+    return user, existing
+
+
+def send_coaching_invitation_email(*, coachee: Coachee) -> bool:
+    """Ask an existing coachee to accept a new coach. Never raises.
+
+    The email deliberately reveals nothing about the person's other coaching
+    relationships, and states that nothing is shared unless they choose to.
+    """
+    user = coachee.user
+    recipient = (user.email or "").strip() if user else ""
+    if not recipient:
+        logger.warning("No email on record for coachee %s; skipping invitation email.", coachee.pk)
+        return False
+
+    coach_name = _display_name(coachee.added_by)
+    greeting_name = _display_name(user)
+    login_url = getattr(settings, "FRONTEND_LOGIN_URL", "") or getattr(settings, "FRONTEND_BASE_URL", "")
+
+    text_body = "\n".join([
+        f"Hi {greeting_name},",
+        "",
+        f"{coach_name} would like to start a coaching relationship with you on the Coaching Platform.",
+        "",
+        "Sign in to accept or decline the invitation from your Profile tab:",
+        "",
+        login_url,
+        "",
+        "Nothing from any other coaching relationship is shared with a new coach",
+        "unless you choose to share it.",
+        "",
+        "The Coaching Platform team",
+    ])
+    safe_name = escape(greeting_name)
+    safe_coach = escape(coach_name)
+    safe_link = escape(login_url)
+    html_body = f"""\
+<div style="font-family:Segoe UI,Arial,sans-serif;color:#1f2933;line-height:1.5">
+  <p>Hi {safe_name},</p>
+  <p><strong>{safe_coach}</strong> would like to start a coaching relationship with you on the
+     <strong>Coaching Platform</strong>.</p>
+  <p>Sign in to accept or decline the invitation from your Profile tab.</p>
+  <p style="margin:24px 0">
+    <a href="{safe_link}"
+       style="background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 20px;
+              border-radius:8px;font-weight:600;display:inline-block">
+      Review invitation
+    </a>
+  </p>
+  <p style="font-size:0.9em;color:#52606d">Nothing from any other coaching relationship is shared
+     with a new coach unless you choose to share it.</p>
+  <p style="font-size:0.85em;color:#7b8794">The Coaching Platform team</p>
+</div>"""
+
+    try:
+        message = EmailMultiAlternatives(
+            subject=f"{coach_name} would like to coach you",
+            body=text_body,
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+            to=[recipient],
+        )
+        message.attach_alternative(html_body, "text/html")
+        sent = message.send(fail_silently=False)
+    except Exception:  # pragma: no cover - transport failures shouldn't block the invitation
+        logger.exception("Failed to send coaching invitation email to %s", recipient)
+        return False
+    if not sent:
+        logger.error("Email backend accepted no messages for %s; invitation email not delivered.", recipient)
+        return False
+    return True
+
+
+def invite_existing_coachee(coachee: Coachee, *, request_questionnaire: bool = True) -> None:
+    """Invite a person who already has a login to a new relationship.
+
+    The relationship stays ``invited`` until they accept. If they never
+    activated their account, they get a fresh activation link instead so they
+    can sign in and see the invitation. Sets ``coachee.invitation_sent`` the
+    same way ``provision_coachee_login`` does, so a coach cannot tell whether
+    the person was already on the platform.
+    """
+    user = coachee.user
+    notify(
+        user,
+        coachee.added_by.username,
+        "coaching_invitation",
+        f"{_display_name(coachee.added_by)} would like to start coaching you. Review the invitation in your Profile.",
+        target_type="relationship",
+        target_id=coachee.id,
+    )
+    if not user.is_active and user.last_login is None:
+        raw_token = create_activation_token(user)
+        coachee.invitation_sent = send_activation_email(
+            user=user, raw_token=raw_token, role="coachee", request_questionnaire=request_questionnaire
+        )
+    else:
+        coachee.invitation_sent = send_coaching_invitation_email(coachee=coachee)
+
+
+def add_coachee_for_coach(serializer_create, validated_data: dict, coach: User, *, request_questionnaire: bool = True) -> Coachee:
+    """Create (or re-open) a coach's relationship with a coachee.
+
+    ``serializer_create`` is the ModelSerializer's ``create`` so field handling
+    stays in the serializer. A person is matched by email so they keep a single
+    login across coaches; every path leaves the relationship ``invited`` until
+    the coachee consents, except coachees with no email (no login to consent).
+    """
+    email = (validated_data.get("email") or "").strip()
+    existing_user, reopen = find_existing_coachee_account(email, coach)
+
+    if reopen is not None:
+        for field in ("name", "email", "notes"):
+            if field in validated_data:
+                setattr(reopen, field, validated_data[field])
+        reopen.status = Coachee.STATUS_INVITED
+        reopen.responded_at = None
+        reopen.save()
+        invite_existing_coachee(reopen, request_questionnaire=request_questionnaire)
+        return reopen
+
+    status = Coachee.STATUS_INVITED if email else Coachee.STATUS_ACTIVE
+    coachee = serializer_create({**validated_data, "added_by": coach, "user": existing_user, "status": status})
+    if existing_user is not None:
+        invite_existing_coachee(coachee, request_questionnaire=request_questionnaire)
+    else:
+        provision_coachee_login(coachee, request_questionnaire=request_questionnaire)
+    return coachee
