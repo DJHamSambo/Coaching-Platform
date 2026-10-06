@@ -7,11 +7,16 @@ interface FoundationalQuestionnaireProps {
   /** When set, shows the foundational questionnaires submitted by this coachee
    * (read-only \u2014 coaches/admins cannot take a questionnaire on someone else's
    * behalf) instead of the signed-in user's own questionnaires. */
-  coacheeId?: string;  /** When true, opens the "take questionnaire" form as soon as this mounts —
+  coacheeId?: string;
+  /** The coachee's current coaches. Each questionnaire is taken for one
+   * coach; with more than one, the coachee picks which. */
+  coaches?: { relationshipId: string; coachName: string }[];
+  /** When true, opens the "take questionnaire" form as soon as this mounts —
    * used to deep-link a coachee straight to it after activating their account
    * from their welcome email. */
   autoOpen?: boolean;
-  onAutoOpenHandled?: () => void;}
+  onAutoOpenHandled?: () => void;
+}
 
 const QUESTIONS = [
   'What would you like to be different as a result of Coaching?',
@@ -37,10 +42,13 @@ function formatSubmitted(iso: string): string {
 export function FoundationalQuestionnaire({
   currentUsername,
   coacheeId,
+  coaches = [],
   autoOpen,
   onAutoOpenHandled,
 }: FoundationalQuestionnaireProps): JSX.Element {
   const readOnly = Boolean(coacheeId);
+  const [forRelationshipId, setForRelationshipId] = useState('');
+  const mustChooseCoach = !readOnly && coaches.length > 1;
   const [items, setItems] = useState<QuestionnaireItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +85,7 @@ export function FoundationalQuestionnaire({
   function openForm(): void {
     setName(currentUsername);
     setAnswers(QUESTIONS.map(() => ''));
+    setForRelationshipId(coaches.length === 1 ? coaches[0].relationshipId : '');
     setFormError(null);
     setFormOpen(true);
   }
@@ -97,6 +106,10 @@ export function FoundationalQuestionnaire({
       setFormError('Please answer at least one question before saving.');
       return;
     }
+    if (mustChooseCoach && !forRelationshipId) {
+      setFormError('Please choose which coach this questionnaire is for.');
+      return;
+    }
     setSaving(true);
     try {
       const created = await createQuestionnaire({
@@ -105,6 +118,7 @@ export function FoundationalQuestionnaire({
           question,
           answer: answers[index].trim(),
         })),
+        coacheeId: forRelationshipId || null,
       });
       setItems((prev) => [created, ...prev]);
       setFormOpen(false);
@@ -139,7 +153,10 @@ export function FoundationalQuestionnaire({
             <li key={item.id}>
               <button type='button' className='questionnaire-list-item' onClick={() => setViewing(item)}>
                 <span className='questionnaire-list-name'>{item.name || 'Foundational questionnaire'}</span>
-                <span className='muted'>{formatSubmitted(item.submittedAt)}</span>
+                <span className='muted'>
+                  {!readOnly && item.coachUsername ? `For ${item.coachUsername} · ` : ''}
+                  {formatSubmitted(item.submittedAt)}
+                </span>
               </button>
             </li>
           ))}
@@ -159,6 +176,24 @@ export function FoundationalQuestionnaire({
             </button>
             <h3>Foundational Questionnaire</h3>
             <form onSubmit={(e) => { void handleSubmit(e); }}>
+              {mustChooseCoach && (
+                <>
+                  <label htmlFor='questionnaire-coach'>Which coach is this for?</label>
+                  <select
+                    id='questionnaire-coach'
+                    value={forRelationshipId}
+                    onChange={(e) => setForRelationshipId(e.target.value)}
+                  >
+                    <option value=''>Select a coach</option>
+                    {coaches.map((coach) => (
+                      <option key={coach.relationshipId} value={coach.relationshipId}>
+                        {coach.coachName}
+                      </option>
+                    ))}
+                  </select>
+                  <p className='muted' style={{ marginTop: 4 }}>Only this coach will see your answers unless you share them.</p>
+                </>
+              )}
               <label htmlFor='questionnaire-name'>Name</label>
               <input
                 id='questionnaire-name'

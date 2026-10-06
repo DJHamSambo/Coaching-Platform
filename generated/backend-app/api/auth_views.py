@@ -16,6 +16,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from api.account_provisioning import mark_must_reset_password
 from api.models import Coachee, UserProfile
 from api.notifications import notify
+from api.relationships import is_coachee_user
 
 MAX_AVATAR_BYTES = 5 * 1024 * 1024  # 5 MB
 ALLOWED_AVATAR_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
@@ -70,7 +71,13 @@ class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
         user.last_login = timezone.now()
         user.save(update_fields=["last_login"])
 
-        coachee = Coachee.objects.filter(user=user).select_related("added_by").first()
+        # Activation accepted the relationship with the coach who invited them.
+        coachee = (
+            Coachee.objects.filter(user=user, status=Coachee.STATUS_ACTIVE)
+            .select_related("added_by")
+            .order_by("created_at", "id")
+            .first()
+        )
         if coachee is None or coachee.added_by is None:
             return
         notify(
@@ -105,11 +112,7 @@ def register(request: Request) -> Response:
 
 
 def _me_payload(user, request: Request) -> dict:
-    # Prefer FK link; only fall back to name for legacy coachees with no linked user account
-    has_coachee_profile = (
-        Coachee.objects.filter(user=user).exists()
-        or Coachee.objects.filter(user__isnull=True, name__iexact=user.username).exists()
-    )
+    has_coachee_profile = is_coachee_user(user)
 
     role = "admin" if user.is_staff else ("coachee" if has_coachee_profile else "coach")
     profile = UserProfile.objects.filter(user=user).first()

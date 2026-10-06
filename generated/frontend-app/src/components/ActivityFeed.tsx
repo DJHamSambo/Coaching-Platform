@@ -19,6 +19,11 @@ const TYPE_LABEL: Record<NotificationItem['type'], string> = {
   contract_executed: 'Contract executed',
   coachee_activated: 'Coachee activated',
   questionnaire_completed: 'Questionnaire completed',
+  coaching_invitation: 'Coaching invitation',
+  invitation_accepted: 'Invitation accepted',
+  invitation_declined: 'Invitation declined',
+  relationship_ended: 'Relationship ended',
+  data_shared: 'Shared with you',
 };
 
 function formatTimestamp(iso: string): string {

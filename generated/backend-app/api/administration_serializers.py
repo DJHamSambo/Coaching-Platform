@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
-from api.account_provisioning import provision_coach_login, provision_coachee_login
+from api.account_provisioning import add_coachee_for_coach, provision_coach_login
 from api.models import Coachee
 
 
@@ -71,12 +71,14 @@ class AdminCoacheeSerializer(serializers.ModelSerializer):
         model = Coachee
         fields = [
             "id", "name", "email", "notes", "user", "user_username",
-            "user_email", "user_phone", "added_by", "added_by_username", "created_at",
-            "request_questionnaire", "invitation_sent",
+            "user_email", "user_phone", "added_by", "added_by_username", "status",
+            "responded_at", "created_at", "request_questionnaire", "invitation_sent",
         ]
+        # ``user`` is set only by matching the email server-side; letting a
+        # coach write it would let them attach any login to their relationship.
         read_only_fields = [
-            "id", "added_by", "added_by_username", "created_at",
-            "user_username", "user_email", "user_phone", "invitation_sent",
+            "id", "user", "added_by", "added_by_username", "status", "responded_at",
+            "created_at", "user_username", "user_email", "user_phone", "invitation_sent",
         ]
 
     def get_invitation_sent(self, obj) -> bool | None:
@@ -93,10 +95,12 @@ class AdminCoacheeSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         request_questionnaire = validated_data.pop("request_questionnaire", True)
-        coachee = super().create(validated_data)
-        # Provision a login account + welcome email when an email is provided.
-        provision_coachee_login(coachee, request_questionnaire=request_questionnaire)
-        return coachee
+        coach = validated_data.pop("added_by")
+        # Matches an existing coachee login by email or provisions a new one,
+        # and emails the invitation either way.
+        return add_coachee_for_coach(
+            super().create, validated_data, coach, request_questionnaire=request_questionnaire
+        )
 
 
 class CoachDirectorySerializer(serializers.ModelSerializer):

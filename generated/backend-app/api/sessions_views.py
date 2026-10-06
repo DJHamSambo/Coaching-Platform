@@ -9,8 +9,14 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from api.models import Coachee, CoachingPlan, Message, Session, WeeklyAvailabilityWindow, UnavailablePeriod
-from api.notifications import notify, resolve_recipient
+from api.models import CoachingPlan, Message, Session, WeeklyAvailabilityWindow, UnavailablePeriod
+from api.notifications import notify
+from api.relationships import (
+    active_coachee_relationships,
+    coachee_recipient,
+    coachee_relationships,
+    is_coachee_user as _is_coachee_user,
+)
 from api.permissions import OwnsObjectPermission
 from api.sessions_serializers import SessionsSerializer, WeeklyAvailabilityWindowSerializer, UnavailablePeriodSerializer
 from api.administration_serializers import CoachDirectorySerializer
@@ -29,19 +35,8 @@ class CalendarPageNumberPagination(pagination.PageNumberPagination):
     max_page_size = getattr(settings, "CALENDAR_MAX_PAGE_SIZE", 500)
 
 
-def _coachee_identity_filter(user) -> Q:
-    # Prefer FK link; fall back only for legacy coachees without a linked user
-    by_user = Q(user=user)
-    legacy = Q(user__isnull=True, name__iexact=user.username)
-    return by_user | legacy
-
-
 def _linked_coachee_queryset(user):
-    return Coachee.objects.filter(_coachee_identity_filter(user)).select_related("added_by")
-
-
-def _is_coachee_user(user) -> bool:
-    return _linked_coachee_queryset(user).exists()
+    return coachee_relationships(user).select_related("added_by")
 
 
 def _resolve_selected_coach_for_coachee(request):
@@ -53,7 +48,10 @@ def _resolve_selected_coach_for_coachee(request):
     except (TypeError, ValueError):
         raise ValidationError({"coach_id": "coach_id must be an integer."})
 
-    coachee_profile = _linked_coachee_queryset(request.user).filter(added_by_id=coach_id).first()
+    # Booking and viewing a coach's availability needs a current relationship.
+    coachee_profile = (
+        active_coachee_relationships(request.user).select_related("added_by").filter(added_by_id=coach_id).first()
+    )
     if not coachee_profile:
         raise PermissionDenied("Selected coach is not linked to this coachee account.")
 
@@ -218,15 +216,14 @@ class SessionsListView(generics.ListCreateAPIView):
 
         # Coach creating session
         coachee_obj = serializer.validated_data.get("coachee")
+        if coachee_obj is not None and coachee_obj.added_by_id != self.request.user.id:
+            raise PermissionDenied("You can only book sessions with your own coachees.")
         coaching_plan = _resolve_coaching_plan(self.request, coachee_obj)
         created = serializer.save(owner=self.request.user, requested_by="coach", coaching_plan=coaching_plan)
 
         # Notify the coachee that the coach booked a session with them.
-        recipient = None
-        if coachee_obj is not None:
-            recipient = getattr(coachee_obj, "user", None) or resolve_recipient(getattr(coachee_obj, "name", ""))
         notify(
-            recipient,
+            coachee_recipient(coachee_obj),
             self.request.user.username,
             "session_booked",
             f"{self.request.user.username} booked a session with you: {created.title}",
@@ -316,7 +313,7 @@ class MyCalendarCoachesListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        linked = _linked_coachee_queryset(request.user)
+        linked = active_coachee_relationships(request.user)
         coach_ids = linked.values_list("added_by_id", flat=True).distinct()
         coaches = User.objects.filter(id__in=coach_ids, is_active=True).order_by("username")
         return Response(CoachDirectorySerializer(coaches, many=True).data)

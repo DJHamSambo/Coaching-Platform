@@ -2,22 +2,14 @@ from rest_framework import generics, permissions
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from api.contracts_serializers import CoachingContractSerializer
-from api.models import Coachee, CoachingContract
+from api.models import CoachingContract
 from api.notifications import notify
-
-
-def _is_coachee_user(user) -> bool:
-    return (
-        Coachee.objects.filter(user=user).exists()
-        or Coachee.objects.filter(user__isnull=True, name__iexact=user.username).exists()
-    )
-
-
-def _linked_coachee_profiles(user):
-    by_user = Coachee.objects.filter(user=user)
-    if by_user.exists():
-        return by_user
-    return Coachee.objects.filter(user__isnull=True, name__iexact=user.username)
+from api.relationships import (
+    active_coachee_relationships,
+    coachee_recipient,
+    coachee_relationships as _linked_coachee_profiles,
+    is_coachee_user as _is_coachee_user,
+)
 
 
 class ContractsListView(generics.ListCreateAPIView):
@@ -52,8 +44,10 @@ class ContractsListView(generics.ListCreateAPIView):
 
         contract = serializer.save(coach=user, status=CoachingContract.STATUS_AWAITING_COACHEE)
 
+        # Held back until the coachee has accepted the relationship; they'll
+        # see the contract waiting for them once they do.
         notify(
-            coachee.user,
+            coachee_recipient(coachee),
             user.username,
             "contract_awaiting_signature",
             f"{user.username} sent you a coaching contract to review and sign.",
@@ -84,7 +78,8 @@ class ContractsDetailView(generics.RetrieveUpdateDestroyAPIView):
             raise PermissionDenied(
                 "Coaches cannot edit a contract once it has been sent for signature."
             )
-        linked_ids = set(_linked_coachee_profiles(user).values_list("id", flat=True))
+        # Signing needs a current relationship, not just a past one.
+        linked_ids = set(active_coachee_relationships(user).values_list("id", flat=True))
         if contract.coachee_id is None or contract.coachee_id not in linked_ids:
             raise PermissionDenied("You do not have permission to update this contract.")
         if contract.status != CoachingContract.STATUS_AWAITING_COACHEE:

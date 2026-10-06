@@ -2,8 +2,9 @@ from rest_framework import generics, permissions
 from django.contrib.auth.models import User
 from django.db.models import Q
 from api.messages_serializers import MessagesSerializer
-from api.models import Coachee, CoachingPlan
+from api.models import CoachingPlan
 from api.notifications import notify_mentions
+from api.relationships import coachee_relationships as _linked_coachee_profiles, is_coachee_user as _is_coachee_user
 
 
 def _resolve_owner(request) -> User:
@@ -12,20 +13,6 @@ def _resolve_owner(request) -> User:
         return user
     owner, _ = User.objects.get_or_create(username="demo_coach", defaults={"email": "demo@example.com"})
     return owner
-
-
-def _linked_coachee_profiles(user):
-    """Coachee profiles linked to this user (FK preferred, legacy name fallback)."""
-    by_user = Coachee.objects.filter(user=user)
-    if by_user.exists():
-        return by_user
-    return Coachee.objects.filter(user__isnull=True, name__iexact=user.username)
-
-
-def _is_coachee_user(user) -> bool:
-    if not user or not getattr(user, "is_authenticated", False):
-        return False
-    return _linked_coachee_profiles(user).exists()
 
 
 def _accessible_plan_ids(user):

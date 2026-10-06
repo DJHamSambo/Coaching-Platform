@@ -13,6 +13,16 @@ from api.users_views import UsersListView, UsersDetailView
 from api.tasks_views import TasksListView, TasksDetailView
 from api.messages_views import MessagesListView, MessagesDetailView
 from api.coachees_views import CoacheesListView, CoacheesDetailView
+from api.relationships_views import (
+    accept_relationship,
+    coachee_shared_data,
+    create_share,
+    decline_relationship,
+    end_relationship,
+    my_relationships,
+    revoke_share,
+    shareable_items,
+)
 from api.plans_views import PlansListView, PlansDetailView, PlanActionsListView, PlanActionsDetailView
 from api.insights_views import InsightsListView, InsightsDetailView
 from api.notifications_views import NotificationsListView, NotificationsDetailView, mark_all_read
@@ -48,6 +58,15 @@ urlpatterns = [
     # Coachees (people managed by coaches)
     path("api/coachees/", CoacheesListView.as_view(), name="coachees-list"),
     path("api/coachees/<int:pk>/", CoacheesDetailView.as_view(), name="coachees-detail"),
+    path("api/coachees/<int:pk>/shared/", coachee_shared_data, name="coachee-shared-data"),
+    # Coaching relationships: consent (accept/decline/end) and coachee-controlled sharing
+    path("api/relationships/", my_relationships, name="relationships-list"),
+    path("api/relationships/<int:pk>/accept/", accept_relationship, name="relationships-accept"),
+    path("api/relationships/<int:pk>/decline/", decline_relationship, name="relationships-decline"),
+    path("api/relationships/<int:pk>/end/", end_relationship, name="relationships-end"),
+    path("api/relationships/<int:pk>/shareable/", shareable_items, name="relationships-shareable"),
+    path("api/relationships/<int:pk>/shares/", create_share, name="relationships-shares"),
+    path("api/relationships/<int:pk>/shares/<int:share_id>/", revoke_share, name="relationships-share-detail"),
     # Coaching plans (sorted by target_date)
     path("api/plans/", PlansListView.as_view(), name="plans-list"),
     path("api/plans/<int:pk>/", PlansDetailView.as_view(), name="plans-detail"),

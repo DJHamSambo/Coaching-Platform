@@ -18,6 +18,9 @@ export interface QuestionnaireItem {
   name: string;
   answers: QuestionnaireAnswer[];
   submittedAt: string;
+  // The coaching relationship (and its coach) this questionnaire was taken for.
+  coacheeId: string | null;
+  coachUsername: string | null;
 }
 
 export interface ContractParty {
@@ -82,7 +85,12 @@ export interface AdminCoach {
   invitationSent?: boolean | null;
 }
 
+// A coachee is one login with one relationship per coach. Each relationship
+// starts 'invited' and only becomes 'active' once the coachee consents.
+export type RelationshipStatus = 'invited' | 'active' | 'declined' | 'ended';
+
 export interface AdminCoachee extends Coachee {
+  status: RelationshipStatus;
   addedById: string;
   addedByUsername: string;
   user?: string | null;
@@ -171,12 +179,12 @@ export interface ResourceItem {
   createdAt: string;
 }
 
-export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created' | 'plan_assigned' | 'resource_added' | 'contract_awaiting_signature' | 'contract_executed' | 'coachee_activated' | 'questionnaire_completed';
+export type NotificationType = 'mention' | 'session_booked' | 'task_assigned' | 'action_created' | 'plan_assigned' | 'resource_added' | 'contract_awaiting_signature' | 'contract_executed' | 'coachee_activated' | 'questionnaire_completed' | 'coaching_invitation' | 'invitation_accepted' | 'invitation_declined' | 'relationship_ended' | 'data_shared';
 
 // Single source of truth for valid notification target types: the runtime array
 // drives the TS union below, so adding a new target type here automatically
 // updates NotificationItem['targetType'] everywhere (see api.ts toNotificationItem).
-export const NOTIFICATION_TARGET_TYPES = ['plan', 'action', 'session', 'insight', 'resource', 'contract', 'coachee'] as const;
+export const NOTIFICATION_TARGET_TYPES = ['plan', 'action', 'session', 'insight', 'resource', 'contract', 'coachee', 'relationship'] as const;
 export type NotificationTargetType = (typeof NOTIFICATION_TARGET_TYPES)[number] | '';
 
 export interface NotificationItem {
@@ -190,6 +198,51 @@ export interface NotificationItem {
   actionId: string | null;
   isRead: boolean;
   createdAt: string;
+}
+
+// A coachee's view of one of their coaching relationships.
+export interface CoachingRelationship {
+  id: string;
+  coachId: string;
+  coachUsername: string;
+  coachName: string;
+  status: RelationshipStatus;
+  createdAt: string;
+  respondedAt: string | null;
+  activeShareCount: number;
+}
+
+export type ShareItemType = 'plan' | 'insight' | 'questionnaire';
+
+// Something the coachee could share with a coach; shareId is set while shared.
+export interface ShareableItem {
+  id: string;
+  label: string;
+  source: string;
+  shareId: string | null;
+}
+
+export interface ShareableItems {
+  plans: ShareableItem[];
+  insights: ShareableItem[];
+  questionnaires: ShareableItem[];
+}
+
+// What a coachee has shared into a coach's relationship (read-only for the coach).
+export interface SharedData {
+  plans: {
+    shareId: string;
+    sharedAt: string;
+    id: string;
+    title: string;
+    description: string;
+    goal: string;
+    status: string;
+    targetDate: string | null;
+    actions: { title: string; status: string; dueDate: string | null }[];
+  }[];
+  insights: { shareId: string; sharedAt: string; id: string; note: string; author: string; createdAt: string }[];
+  questionnaires: { shareId: string; sharedAt: string; id: string; name: string; answers: QuestionnaireAnswer[]; submittedAt: string }[];
 }
 
 export type { CalendarSession, WeeklyAvailabilityWindow, UnavailablePeriod } from './types/calendarTypes';

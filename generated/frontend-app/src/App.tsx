@@ -348,6 +348,12 @@ export default function App() {
       setActiveModule('administration');
       return;
     }
+    if (notification.targetType === 'relationship') {
+      // Coaching invitations and ended relationships live under the
+      // coachee's "My coaches" section of their Profile.
+      setActiveModule('profile');
+      return;
+    }
     setActiveModule('activity');
   }
 
